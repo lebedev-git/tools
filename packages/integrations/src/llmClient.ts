@@ -31,32 +31,49 @@ export class LlmClient {
       throw new Error("LLM_API_KEY is not configured.");
     }
 
-    const response = await fetch(`${this.config.llmBaseUrl}${this.config.llmChatCompletionsPath}`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.config.llmApiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: options.model ?? "qwen3.7-max",
-        messages: options.messages,
-        temperature: options.temperature ?? 0.4,
-        max_tokens: options.maxTokens ?? 4096
-      })
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
 
-    const body = (await response.json()) as ChatCompletionResponse;
+    try {
+      const response = await fetch(`${this.config.llmBaseUrl}${this.config.llmChatCompletionsPath}`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.config.llmApiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: options.model ?? "qwen3.7-max",
+          messages: options.messages,
+          temperature: options.temperature ?? 0.4,
+          max_tokens: options.maxTokens ?? 4096
+        }),
+        signal: controller.signal
+      });
 
-    if (!response.ok) {
-      throw new Error(body.error?.message || `LLM provider returned ${response.status}.`);
+      const body = (await response.json()) as ChatCompletionResponse;
+
+      if (!response.ok) {
+        throw new Error(body.error?.message || `LLM provider returned ${response.status}.`);
+      }
+
+      const content = body.choices?.[0]?.message?.content?.trim();
+
+      if (!content) {
+        throw new Error("LLM provider returned an empty response.");
+      }
+
+      // Strip trailing metadata details injected by proxy routers
+      let cleaned = content.replace(/<details>[\s\S]*?<\/details>/gi, "");
+      cleaned = cleaned.replace(/Response ID:\s*[a-f0-9-]+\s*/gi, "");
+      cleaned = cleaned.replace(/Request ID:\s*[a-f0-9-]+\s*/gi, "");
+      return cleaned.trim();
+    } catch (error: any) {
+      if (error.name === "AbortError") {
+        throw new Error("LLM request timed out after 60 seconds.");
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    const content = body.choices?.[0]?.message?.content?.trim();
-
-    if (!content) {
-      throw new Error("LLM provider returned an empty response.");
-    }
-
-    return content;
   }
 }

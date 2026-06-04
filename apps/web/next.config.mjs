@@ -7,7 +7,8 @@ const nextConfig = {
   turbopack: {
     root: repoRoot
   },
-  transpilePackages: ["@tools/core", "@tools/analytics", "@tools/protocols"]
+  transpilePackages: ["@tools/core", "@tools/analytics", "@tools/protocols", "@tools/integrations"],
+  devIndicators: false
 };
 
 export default nextConfig;

@@ -48,3 +48,4 @@ export {
   type YandexFormAnswersResponse
 } from "./yandexFormsClient";
 export { LlmClient, type ChatCompletionOptions, type ChatMessage } from "./llmClient";
+export { ImageGenerationClient, type ImageGenerationOptions } from "./imageClient";

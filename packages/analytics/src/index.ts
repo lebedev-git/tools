@@ -3,7 +3,7 @@ export { yandexFormIds, yandexFormSources, type YandexFormKind, type YandexFormS
 export { buildDay1ReportMessages, type Day1ReportPromptInput } from "./day1Report";
 
 export interface AnalyticsBlock {
-  id: "day1" | "day2" | "overall" | "nps" | "media" | "publish";
+  id: "day1" | "day2" | "overall" | "products" | "infographic" | "logo" | "generalPhoto" | "publish";
   title: string;
   enabled: boolean;
   description: string;
@@ -14,37 +14,49 @@ export const analyticsBlocks: AnalyticsBlock[] = [
     id: "day1",
     title: "День 1",
     enabled: true,
-    description: "Входные и выходные формы, нормализация, метрики и первая аналитическая записка."
+    description: "Анализ входных и выходных форм первого дня."
   },
   {
     id: "day2",
     title: "День 2",
-    enabled: true,
-    description: "Отдельная аналитика второго дня с опциональным сравнением с Днем 1."
+    enabled: false,
+    description: "Анализ результатов и прогресса второго дня."
   },
   {
     id: "overall",
     title: "Общая аналитика",
-    enabled: true,
-    description: "Синтез выбранных дней и итоговые рекомендации."
+    enabled: false,
+    description: "Синтез результатов сессии за все дни."
   },
   {
-    id: "nps",
-    title: "NPS",
+    id: "products",
+    title: "Продукты",
     enabled: false,
-    description: "Расчет promoters/passives/detractors и интерпретация результата."
+    description: "Результаты стратегической сессии."
   },
   {
-    id: "media",
-    title: "Фото/медиа",
+    id: "infographic",
+    title: "Инфографика",
     enabled: false,
-    description: "Файлы, подписи и optional dashboard image."
+    description: "Создание инфографики."
+  },
+  {
+    id: "logo",
+    title: "Логотип",
+    enabled: false,
+    description: "Загрузка логотипа сессии."
+  },
+  {
+    id: "generalPhoto",
+    title: "Общее фото",
+    enabled: false,
+    description: "Загрузка общей фотографии участников."
   },
   {
     id: "publish",
     title: "Публикация",
-    enabled: true,
-    description: "Создание или обновление документа в Outline."
+    enabled: false,
+    description: "Публикация отчетов и результатов в Outline."
   }
 ];
 
@@ -52,34 +64,34 @@ export const analyticsSteps: ProcessStep[] = [
   {
     id: "fetch-forms",
     title: "Загрузка форм",
-    description: "Yandex Forms snapshots для выбранной сессии.",
+    description: "Снимки Яндекс Форм для выбранной сессии.",
     status: "succeeded"
   },
   {
     id: "normalize",
     title: "Нормализация",
-    description: "Mapping ответов, расчет базовых метрик, проверка структуры.",
+    description: "Сопоставление ответов, расчет метрик, проверка структуры.",
     status: "succeeded",
     dependsOn: ["fetch-forms"]
   },
   {
     id: "llm",
-    title: "LLM аналитика",
-    description: "Prompt version, structured output и provider request audit.",
+    title: "ИИ-аналитика",
+    description: "Генерация отчетов и ИИ-анализ ответов.",
     status: "running",
     dependsOn: ["normalize"]
   },
   {
     id: "media",
     title: "Медиа",
-    description: "Optional фото и dashboard image.",
+    description: "Загрузка изображений и создание инфографики.",
     status: "pending",
     dependsOn: ["llm"]
   },
   {
     id: "publish",
-    title: "Outline",
-    description: "Публикация итоговой аналитической записки.",
+    title: "Публикация",
+    description: "Сохранение и публикация результатов сессии.",
     status: "pending",
     dependsOn: ["llm"]
   }

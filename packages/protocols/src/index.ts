@@ -31,7 +31,7 @@ export const protocolSteps: ProcessStep[] = [
   {
     id: "source",
     title: "Источник",
-    description: "Ручной ввод, файл, transcript, форма или черновик.",
+    description: "Ручной ввод, файл, транскрипт, форма или черновик.",
     status: "succeeded"
   },
   {
@@ -44,21 +44,21 @@ export const protocolSteps: ProcessStep[] = [
   {
     id: "draft",
     title: "Черновик",
-    description: "LLM формирует protocol draft без публикации.",
+    description: "ИИ формирует черновик протокола без публикации.",
     status: "running",
     dependsOn: ["extract"]
   },
   {
     id: "review",
-    title: "Review",
-    description: "Ручная правка и согласование.",
+    title: "Согласование",
+    description: "Ручная правка и утверждение.",
     status: "pending",
     dependsOn: ["draft"]
   },
   {
     id: "publish",
-    title: "Outline",
-    description: "Публикация approved версии.",
+    title: "Публикация",
+    description: "Публикация утвержденной версии.",
     status: "blocked",
     dependsOn: ["review"]
   }

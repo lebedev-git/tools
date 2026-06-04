@@ -24,25 +24,38 @@ export class YandexFormsClient {
       throw new Error("YANDEX_FORMS_AUTH_HEADER_VALUE is not configured.");
     }
 
-    const response = await fetch(`${this.config.yandexFormsApiUrl}/surveys/${formId}/answers?page_size=1000`, {
-      headers: {
-        Accept: "application/json",
-        "X-Cloud-Org-Id": this.config.yandexFormsOrgId,
-        [this.config.yandexFormsAuthHeaderName]: this.config.yandexFormsAuthHeaderValue
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+    try {
+      const response = await fetch(`${this.config.yandexFormsApiUrl}/surveys/${formId}/answers?page_size=1000`, {
+        headers: {
+          Accept: "application/json",
+          "X-Cloud-Org-Id": this.config.yandexFormsOrgId,
+          [this.config.yandexFormsAuthHeaderName]: this.config.yandexFormsAuthHeaderValue
+        },
+        signal: controller.signal
+      });
+
+      const body = (await response.json()) as YandexFormAnswersResponse & {
+        detail?: string;
+        message?: string;
+        description?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(body.detail || body.message || body.description || `Yandex Forms API returned ${response.status}.`);
       }
-    });
 
-    const body = (await response.json()) as YandexFormAnswersResponse & {
-      detail?: string;
-      message?: string;
-      description?: string;
-    };
-
-    if (!response.ok) {
-      throw new Error(body.detail || body.message || body.description || `Yandex Forms API returned ${response.status}.`);
+      return body;
+    } catch (error: any) {
+      if (error.name === "AbortError") {
+        throw new Error("Yandex Forms request timed out after 30 seconds.");
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    return body;
   }
 }
 

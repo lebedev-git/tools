@@ -1,0 +1,16 @@
+{
+  "name": "tools",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.24.0",
+  "scripts": {
+    "dev": "corepack pnpm --filter @tools/web dev",
+    "worker:dev": "corepack pnpm --filter @tools/worker dev",
+    "build": "corepack pnpm --filter @tools/web build",
+    "lint": "corepack pnpm --filter @tools/web lint",
+    "typecheck": "corepack pnpm --filter @tools/web typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

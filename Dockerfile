@@ -9,6 +9,9 @@ FROM base AS deps
 RUN apk add --no-cache libc6-compat
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY apps/web/package.json ./apps/web/
+COPY packages/core/package.json ./packages/core/
+COPY packages/db/package.json ./packages/db/
+COPY packages/analytics/package.json ./packages/analytics/
 COPY packages/integrations/package.json ./packages/integrations/
 COPY packages/protocols/package.json ./packages/protocols/
 RUN pnpm install --frozen-lockfile

@@ -350,7 +350,7 @@ function AnalyticsView({ promptSettings, activeRun, setActiveRun }: AnalyticsVie
       ...latestAnalyticsRun,
       status: "running",
       progress: 10,
-      steps: latestAnalyticsRun.steps.map((s) => {
+      steps: latestAnalyticsRun.steps.map((s: any) => {
         if (s.id === "fetch-forms") return { ...s, status: "running" as const };
         return { ...s, status: "pending" as const };
       })

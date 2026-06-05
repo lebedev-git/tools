@@ -15,10 +15,7 @@ RUN pnpm install --frozen-lockfile
 
 # Rebuild the source code only when needed
 FROM base AS builder
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
-COPY --from=deps /app/packages/integrations/node_modules ./packages/integrations/node_modules
-COPY --from=deps /app/packages/protocols/node_modules ./packages/protocols/node_modules
+COPY --from=deps /app ./
 COPY . .
 
 # Next.js collects completely anonymous telemetry data about general usage.

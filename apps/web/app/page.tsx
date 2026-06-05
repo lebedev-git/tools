@@ -1,8 +1,6 @@
 "use client";
 
 import {
-  Activity,
-  ArrowUpRight,
   BarChart3,
   Boxes,
   Calendar,
@@ -18,14 +16,12 @@ import {
   FileText,
   Gauge,
   LayoutDashboard,
-  ListChecks,
   Loader2,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
   PieChart,
   Play,
-  Plus,
   RefreshCw,
   Save,
   Settings,
@@ -36,8 +32,8 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { analyticsBlocks, latestAnalyticsRun } from "@tools/analytics";
-import { latestProtocolRun, protocolFields, sampleProtocols } from "@tools/protocols";
-import { statusLabels, statusTone, type ProcessRun, type ProcessStep } from "@tools/core";
+import { latestProtocolRun, type ProtocolRecord } from "@tools/protocols";
+import { type ProcessRun, type ProcessStep } from "@tools/core";
 
 type Section =
   | "analytics"
@@ -51,8 +47,6 @@ type Section =
   | "prompt-generalPhoto"
   | "prompt-publish"
   | "protocols"
-  | "runs"
-  | "documents"
   | "settings";
 
 type AnalyticsBlockId = (typeof analyticsBlocks)[number]["id"];
@@ -106,7 +100,7 @@ interface RunStep {
   status: "pending" | "running" | "succeeded" | "failed";
 }
 
-const promptDefaults: Record<AnalyticsBlockId, string> = {
+const promptDefaults: Record<string, string> = {
   day1: "Проанализируй анкеты обратной связи участников за День 1. Сделай структурированный отчет на русском языке.\nВыдели:\n1. Количество ответов, общий уровень удовлетворенности и индекс NPS.\n2. Топ-3 освоенных инструментов (например: Perplexity, Gamma, Suno).\n3. Качественные показатели изменения отношения к ИИ (в процентах и долях).\n4. Качественные эффекты: преодоление страха (уверенность на входе/выходе), формирование единого понятийного поля, практические результаты внедрения (планы внедрения, автоматизация отчетности).",
   day2: "Проанализируй анкеты обратной связи участников за День 2.\nСфокусируйся на динамике по сравнению с Днем 1:\n1. Сравнительные метрики NPS и удовлетворенности.\n2. Изменение уверенности при работе с ИИ, командная согласованность.\n3. Новые изученные сценарии и продвинутые инструменты.",
   overall: "Синтезируй результаты первого и второго дня стратегической сессии в единую аналитическую справку на русском языке.\nСобери все ключевые метрики (NPS по дням, командная согласованность, рост числа освоенных инструментов).\nОпиши качественные эффекты (преодоление барьеров, командная синергия, практические планы).",
@@ -114,7 +108,10 @@ const promptDefaults: Record<AnalyticsBlockId, string> = {
   infographic: "Собери итоговую разметку для дашборда-инфографики формата 16:9 на основе аналитики сессии.\nРазметка должна строго соответствовать следующей структуре:\n\nЗАГОЛОВОК (ВЕРХНИЙ КОЛОНТИТУЛ):\nТренажёр «МАЯК» | ИИ-грамотность для органов власти [Даты сессии, Город]\n\nЛЕВАЯ КОЛОНКА: ЗАДАЧИ И МЕТРИКИ\nЭффективность программы:\n• NPS День 1: [Значение]\n• NPS День 2: [Значение]\n• Командная согласованность: [Оценка]/10\n• Рост числа инструментов: [На входе] → [На выходе] (+[Разница] за день)\n\nПРАВАЯ КОЛОНКА (ИЛИ НИЖНИЙ БЛОК): КОМПЕТЕНЦИИ И ИНСАЙТЫ\nКОМПЕТЕНЦИИ И НАВЫКИ (Уровень владения ИИ):\n• На входе: [Оценка]/10\n• На выходе: [Оценка]/10 (Рост уверенности в [Коэффициент] раза)\n\nТоп-3 инструментария (Лидеры освоения):\n1. Аналитика и Данные: [Инструмент 1]\n2. Визуал и Презентации: [Инструмент 2]\n3. Креатив и Аудио: [Инструмент 3]\n\nКАЧЕСТВЕННЫЕ ПОКАЗАТЕЛИ (Изменение отношения к ИИ):\n• Кардинально изменилось (Увидели огромный потенциал): [Процент]% ([Доля])\n• Дополнилось (Увидели новые сценарии): [Процент]% ([Доля])\n\nКачественные эффекты:\n• Преодоление страха: [Краткое описание эффекта и количества инструментов].\n• Командная синергия: [Описание формирования единого понятийного поля].\n• Практический результат: [Описание конкретных планов внедрения и автоматизации отчетов].\n\nВизуальное оформление: указать место для логотипа и общего фото участников, цветовой стиль адаптировать под цвета логотипа.",
   logo: "",
   generalPhoto: "",
-  publish: ""
+  publish: "",
+  "protocol.meeting": "Проанализируй стенограмму или заметки встречи. Сформируй структурированный протокол на русском языке.\nВыдели и подробно распиши следующие разделы:\n- Тема (Краткое резюме сути обсуждения)\n- Повестка (Список обсуждавшихся вопросов)\n- Основные тезисы (Ключевые аргументы, идеи и обсуждения)\n- Решения (Список утвержденных решений)\n- Задачи (Список конкретных поручений)\n- Ответственные (Кто выполняет задачи)\n- Сроки (Дедлайны для каждой задачи)\n- Риски (Выявленные угрозы или неопределенности)\n- Приложения (Документы, ссылки или дополнительные материалы)",
+  "protocol.session": "Проанализируй результаты рабочей сессии. Выдели ключевые решения, задачи, ответственных лиц, сроки, а также основные риски и приложения.",
+  "protocol.transcript": "Сделай дословную и максимально точную транскрибацию этого аудиофайла на русском языке, обязательно разделяя текст по спикерам (диаризация по голосам). Форматируй текст в виде диалога, указывая спикеров, например:\nСпикер 1: [реплика спикера]\nСпикер 2: [реплика спикера]\nИ так далее. Внимательно следи за сменой голосов. Запиши только произнесенный текст встречи, не добавляй от себя никаких комментариев, резюме или вводных фраз."
 };
 
 function formatDate(value?: string) {
@@ -141,9 +138,6 @@ function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
-function StatusPill({ status }: { status: keyof typeof statusLabels }) {
-  return <span className={cx("status-pill", `tone-${statusTone[status]}`)}>{statusLabels[status]}</span>;
-}
 
 function StepIcon({ status }: { status: ProcessStep["status"] }) {
   if (status === "succeeded") {
@@ -155,43 +149,9 @@ function StepIcon({ status }: { status: ProcessStep["status"] }) {
   return <CircleDashed size={16} />;
 }
 
-function ProcessGraph({ steps }: { steps: ProcessStep[] }) {
-  return (
-    <div className="process-graph" aria-label="Граф процесса">
-      {steps.map((step, index) => (
-        <div className="graph-row" key={step.id}>
-          <div className={cx("graph-node", `node-${step.status}`)}>
-            <StepIcon status={step.status} />
-            <div>
-              <strong>{step.title}</strong>
-              <span>{step.description}</span>
-            </div>
-          </div>
-          {index < steps.length - 1 ? <div className="graph-line" /> : null}
-        </div>
-      ))}
-    </div>
-  );
-}
 
-function RunSummary({ run }: { run: ProcessRun }) {
-  return (
-    <section className="run-summary">
-      <div>
-        <div className="eyebrow">{run.toolType === "analytics" ? "Analytics Tool" : "Protocol Tool"}</div>
-        <h3>{run.title}</h3>
-        <p>Запущено: {run.startedAt}</p>
-      </div>
-      <div className="run-meter">
-        <StatusPill status={run.status} />
-        <div className="meter">
-          <span style={{ width: `${run.progress}%` }} />
-        </div>
-        <small>{run.progress}%</small>
-      </div>
-    </section>
-  );
-}
+
+
 
 interface AnalyticsViewProps {
   promptSettings: Record<AnalyticsBlockId, string>;
@@ -983,30 +943,473 @@ function AnalyticsView({ promptSettings, activeRun, setActiveRun }: AnalyticsVie
   );
 }
 
-function ProtocolsView({ activeRun, setActiveRun }: { activeRun: ProcessRun; setActiveRun: Dispatch<SetStateAction<ProcessRun>> }) {
-  const [selectedProtocol, setSelectedProtocol] = useState(sampleProtocols[0]?.id ?? "");
-  const protocol = sampleProtocols.find((item) => item.id === selectedProtocol) ?? sampleProtocols[0];
+function ProtocolsView({
+  activeRun,
+  setActiveRun,
+  promptSettings
+}: {
+  activeRun: ProcessRun;
+  setActiveRun: Dispatch<SetStateAction<ProcessRun>>;
+  promptSettings: Record<string, string>;
+}) {
+  const [protocols, setProtocols] = useState<ProtocolRecord[]>([]);
+  const [selectedProtocolId, setSelectedProtocolId] = useState("");
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [progressMessage, setProgressMessage] = useState("");
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [previewTab, setPreviewTab] = useState<"protocol" | "transcript">("protocol");
 
-  const handleRegenerate = () => {
+  const [chunksCount, setChunksCount] = useState<number | null>(null);
+  const [mediaDuration, setMediaDuration] = useState<number | null>(null);
+  const [currentStage, setCurrentStage] = useState<string>("");
+  const [extractingProgressText, setExtractingProgressText] = useState("Инициализация анализа текста...");
+
+  const [hasRunStarted, setHasRunStarted] = useState(false);
+  const [runSteps, setRunSteps] = useState<Array<{
+    id: string;
+    title: string;
+    description: string;
+    status: "pending" | "running" | "succeeded" | "failed";
+  }>>([]);
+
+  useEffect(() => {
+    async function loadProtocols() {
+      try {
+        const res = await fetch("/api/protocols");
+        const data = await res.json();
+        let list = data.protocols || [];
+        if (list.length === 0) {
+          const defaultProto = {
+            id: "default-protocol",
+            title: "Новый протокол встречи",
+            date: new Date().toISOString().substring(0, 10),
+            status: "draft" as const,
+            participants: ["Администратор"],
+            actionItems: 0,
+            decisions: 0,
+            transcript: "",
+            theme: "",
+            agenda: "",
+            keyPoints: "",
+            decisionsText: "",
+            tasksText: "",
+            responsible: "",
+            deadlines: "",
+            risks: "",
+            attachments: ""
+          };
+          list = [defaultProto];
+          await fetch("/api/protocols", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ protocols: list })
+          });
+        }
+        setProtocols(list);
+        setSelectedProtocolId(list[0]?.id || "default-protocol");
+      } catch (err) {
+        console.error("Failed to load protocols:", err);
+      }
+    }
+    void loadProtocols();
+  }, []);
+
+  const saveProtocols = async (updatedList: ProtocolRecord[]) => {
+    try {
+      await fetch("/api/protocols", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ protocols: updatedList })
+      });
+    } catch (err) {
+      console.error("Failed to save protocols:", err);
+    }
+  };
+
+  const protocol = protocols.find((item) => item.id === selectedProtocolId);
+
+  // Sync run steps from existing protocol data or selected file
+  useEffect(() => {
+    if (protocol) {
+      const hasTranscript = Boolean(protocol.transcript && protocol.transcript.trim());
+      const hasProtocol = Boolean(protocol.theme && protocol.theme.trim());
+
+      if (isGenerating) {
+        return;
+      }
+
+      if (hasTranscript || hasProtocol) {
+        setHasRunStarted(true);
+        setRunSteps([
+          { id: "split", title: "Разбивка файла", description: "Файл успешно подготовлен и разбит на сегменты", status: "succeeded" },
+          { id: "transcribe", title: "Подготовка стенограммы", description: hasTranscript ? "Стенограмма успешно подготовлена" : "Ожидание подготовки...", status: hasTranscript ? "succeeded" : "pending" },
+          { id: "extract", title: "Подготовка протокола", description: hasProtocol ? "Протокол встречи подготовлен" : "Ожидание подготовки...", status: hasProtocol ? "succeeded" : "pending" }
+        ]);
+      } else if (selectedFile) {
+        setHasRunStarted(true);
+        const partsText = chunksCount !== null ? `Определено частей: ${chunksCount}. Готов к запуску` : "Определение частей...";
+        setRunSteps([
+          { id: "split", title: "Разбивка файла", description: partsText, status: "pending" },
+          { id: "transcribe", title: "Подготовка стенограммы", description: "Ожидание запуска", status: "pending" },
+          { id: "extract", title: "Подготовка протокола", description: "Ожидание запуска", status: "pending" }
+        ]);
+      } else {
+        setHasRunStarted(false);
+        setRunSteps([]);
+      }
+    }
+  }, [selectedProtocolId, protocol, selectedFile, chunksCount, isGenerating]);
+
+  // Rotator of AI phases during extraction
+  useEffect(() => {
+    let timer: NodeJS.Timeout | null = null;
+    if (isGenerating && currentStage === "extract") {
+      const phrases = [
+        "Анализируем структуру стенограммы...",
+        "Выделяем ключевые темы обсуждения...",
+        "Определяем список принятых решений...",
+        "Формулируем задачи и поручения...",
+        "Составляем список ответственных лиц...",
+        "Определяем сроки и дедлайны...",
+        "Анализируем потенциальные риски...",
+        "Генерируем финальный структурированный протокол...",
+        "Завершаем оформление документа..."
+      ];
+      let idx = 0;
+      setExtractingProgressText(phrases[0]);
+      timer = setInterval(() => {
+        idx = (idx + 1) % phrases.length;
+        setExtractingProgressText(phrases[idx]);
+      }, 5000);
+    } else {
+      setExtractingProgressText("Инициализация анализа текста...");
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [isGenerating, currentStage]);
+
+  const handleFileSelect = (file: File | null) => {
+    setError(null);
+    if (!file) {
+      setSelectedFile(null);
+      setChunksCount(null);
+      setMediaDuration(null);
+      return;
+    }
+
+    setSelectedFile(file);
+    setChunksCount(null);
+    setMediaDuration(null);
+
+    const objectUrl = URL.createObjectURL(file);
+    const isVideo = file.type.startsWith("video");
+    const media = document.createElement(isVideo ? "video" : "audio");
+    media.src = objectUrl;
+
+    media.onloadedmetadata = () => {
+      const duration = media.duration;
+      if (duration && !isNaN(duration)) {
+        setMediaDuration(duration);
+        const count = Math.ceil(duration / 600); // 10 минут = 600 секунд
+        setChunksCount(count);
+      } else {
+        setChunksCount(1);
+      }
+      URL.revokeObjectURL(objectUrl);
+    };
+
+    media.onerror = () => {
+      setChunksCount(1);
+      URL.revokeObjectURL(objectUrl);
+    };
+  };
+
+  const handleFieldChange = (fieldKey: keyof ProtocolRecord, value: string) => {
+    const updated = protocols.map((item) => {
+      if (item.id === selectedProtocolId) {
+        const updatedItem = { ...item };
+        if (fieldKey === "participants") {
+          updatedItem.participants = value.split(",").map((p) => p.trim()).filter(Boolean);
+        } else {
+          Object.assign(updatedItem, { [fieldKey]: value });
+        }
+
+        if (fieldKey === "decisionsText") {
+          const lines = value.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("-") || l.startsWith("*") || /^\d+\./.test(l) || l.length > 0);
+          updatedItem.decisions = lines.length;
+        }
+        if (fieldKey === "tasksText") {
+          const lines = value.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("-") || l.startsWith("*") || /^\d+\./.test(l) || l.length > 0);
+          updatedItem.actionItems = lines.length;
+        }
+
+        return updatedItem;
+      }
+      return item;
+    });
+    setProtocols(updated);
+    void saveProtocols(updated);
+  };
+
+  const handleRegenerate = async () => {
+    if (!protocol) return;
+
+    if (!selectedFile) {
+      alert("Файл не выбран. Пожалуйста, выберите аудио или видео файл.");
+      return;
+    }
+
+    setIsGenerating(true);
+    setError(null);
+    setProgressMessage("Подготовка файла...");
+    setUploadProgress(5);
+    setPreviewTab("transcript");
+    setHasRunStarted(true);
+
+    const partsCount = chunksCount || 1;
+    setRunSteps([
+      { id: "split", title: "Разбивка файла", description: "Сохранение и конвертация файла...", status: "running" },
+      { id: "transcribe", title: "Подготовка стенограммы", description: `Ожидание распознавания речи (${partsCount} частей)...`, status: "pending" },
+      { id: "extract", title: "Подготовка протокола", description: "Ожидание выделения структуры...", status: "pending" }
+    ]);
+
+    setProtocols((prevProtocols) => prevProtocols.map((item) => {
+      if (item.id === protocol.id) {
+        return {
+          ...item,
+          transcript: "",
+          theme: "",
+          agenda: "",
+          keyPoints: "",
+          decisionsText: "",
+          tasksText: "",
+          responsible: "",
+          deadlines: "",
+          risks: "",
+          attachments: "",
+          decisions: 0,
+          actionItems: 0,
+          status: "draft"
+        };
+      }
+      return item;
+    }));
+
     setActiveRun({
       ...activeRun,
       status: "running",
-      progress: 60,
-      steps: activeRun.steps.map(s => {
-        if (s.id === "source" || s.id === "extract") return { ...s, status: "succeeded" as const };
-        if (s.id === "draft") return { ...s, status: "running" as const };
+      progress: 5,
+      steps: activeRun.steps.map((s) => {
+        if (s.id === "source") return { ...s, status: "running" as const, description: "Загрузка файла на сервер..." };
         return { ...s, status: "pending" as const };
       })
     });
+
+    try {
+      const promptText = promptSettings["protocol.meeting"] || "";
+      const transcriptPromptText = promptSettings["protocol.transcript"] || "";
+      const formData = new FormData();
+      formData.append("file", selectedFile);
+      formData.append("protocolId", protocol.id);
+      formData.append("prompt", promptText);
+      formData.append("transcriptPrompt", transcriptPromptText);
+
+      const response = await fetch("/api/protocols/runs", {
+        method: "POST",
+        body: formData
+      });
+
+      if (!response.ok) {
+        throw new Error(`Ошибка сервера: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error("Не удалось прочитать поток ответа сервера.");
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const update = JSON.parse(line);
+
+          if (update.status === "failed") {
+            throw new Error(update.message || "Ошибка генерации протокола.");
+          }
+
+          if (update.stage) {
+            setCurrentStage(update.stage);
+          }
+
+          if (update.message) {
+            setProgressMessage(update.message);
+          }
+          if (typeof update.progress === "number") {
+            setUploadProgress(update.progress);
+          }
+
+          if (update.currentTranscript) {
+            setProtocols((prevProtocols) => prevProtocols.map((item) => {
+              if (item.id === protocol.id) {
+                return {
+                  ...item,
+                  transcript: update.currentTranscript
+                };
+              }
+              return item;
+            }));
+          }
+
+          setRunSteps((prevSteps) => {
+            return prevSteps.map((step) => {
+              if (update.stage === "upload" || update.stage === "convert" || update.stage === "split") {
+                if (step.id === "split") {
+                  return { ...step, status: "running" as const, description: update.message || "Подготовка и разделение файла..." };
+                }
+              }
+              if (update.stage === "transcribe") {
+                if (step.id === "split") {
+                  return { ...step, status: "succeeded" as const, description: `Файл успешно подготовлен и разбит на ${partsCount} частей` };
+                }
+                if (step.id === "transcribe") {
+                  return { ...step, status: "running" as const, description: update.message || "Распознавание речи..." };
+                }
+              }
+              if (update.stage === "extract" || update.stage === "save") {
+                if (step.id === "split") return { ...step, status: "succeeded" as const, description: `Файл успешно подготовлен и разбит на ${partsCount} частей` };
+                if (step.id === "transcribe") return { ...step, status: "succeeded" as const, description: "Стенограмма успешно подготовлена" };
+                if (step.id === "extract") {
+                  return { ...step, status: "running" as const, description: update.message || "Извлечение ИИ структуры протокола..." };
+                }
+              }
+              return step;
+            });
+          });
+
+          if (update.stage === "done" && update.extractedData) {
+            const ext = update.extractedData;
+            const finalTranscript = update.finalTranscript || "";
+
+            const decisionsCount = ext.decisionsText
+              ? ext.decisionsText.split("\n").map((l: string) => l.trim()).filter((l: string) => l.startsWith("-") || l.startsWith("*") || /^\d+\./.test(l) || l.length > 0).length
+              : 0;
+            const tasksCount = ext.tasksText
+              ? ext.tasksText.split("\n").map((l: string) => l.trim()).filter((l: string) => l.startsWith("-") || l.startsWith("*") || /^\d+\./.test(l) || l.length > 0).length
+              : 0;
+
+            const updated = protocols.map((item) => {
+              if (item.id === selectedProtocolId) {
+                return {
+                  ...item,
+                  transcript: finalTranscript,
+                  theme: ext.theme || "",
+                  agenda: ext.agenda || "",
+                  keyPoints: ext.keyPoints || "",
+                  decisionsText: ext.decisionsText || "",
+                  tasksText: ext.tasksText || "",
+                  responsible: ext.responsible || "",
+                  deadlines: ext.deadlines || "",
+                  risks: ext.risks || "",
+                  attachments: ext.attachments || "",
+                  decisions: decisionsCount,
+                  actionItems: tasksCount,
+                  status: "review" as const
+                };
+              }
+              return item;
+            });
+
+            setProtocols(updated);
+            await saveProtocols(updated);
+
+            setRunSteps([
+              { id: "split", title: "Разбивка файла", description: `Файл успешно подготовлен и разбит на ${partsCount} частей`, status: "succeeded" },
+              { id: "transcribe", title: "Подготовка стенограммы", description: "Стенограмма успешно подготовлена", status: "succeeded" },
+              { id: "extract", title: "Подготовка протокола", description: "Протокол встречи подготовлен", status: "succeeded" }
+            ]);
+
+            setSelectedFile(null);
+          }
+        }
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Не удалось сгенерировать протокол.";
+      setError(errorMessage);
+      setProgressMessage("Ошибка генерации");
+      setRunSteps((prevSteps) => prevSteps.map((s) => s.status === "running" ? { ...s, status: "failed" as const, description: "Сбой операции" } : s));
+    } finally {
+      setIsGenerating(false);
+      setUploadProgress(null);
+      setCurrentStage("");
+    }
   };
 
-  const handlePublish = () => {
-    setActiveRun({
-      ...activeRun,
-      status: "succeeded",
-      progress: 100,
-      steps: activeRun.steps.map(s => ({ ...s, status: "succeeded" as const }))
-    });
+  const handleDownloadDocx = async () => {
+    if (!protocol) return;
+
+    try {
+      const response = await fetch("/api/protocols/download-docx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(protocol)
+      });
+
+      if (!response.ok) {
+        throw new Error("Не удалось сгенерировать DOCX файл.");
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${protocol.title.toLowerCase().replace(/\s+/g, "-")}.docx`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Ошибка при скачивании файла.");
+    }
+  };
+
+  const handleDownloadTranscriptDocx = async () => {
+    if (!protocol?.transcript) return;
+
+    try {
+      const response = await fetch("/api/analytics/download-docx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: `Стенограмма встречи: ${protocol.title || "Новый протокол"}`,
+          markdown: protocol.transcript
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error("Не удалось сгенерировать DOCX файл.");
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${protocol.title.toLowerCase().replace(/\s+/g, "-")}-transcript.docx`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Ошибка при скачивании файла.");
+    }
   };
 
   return (
@@ -1016,140 +1419,384 @@ function ProtocolsView({ activeRun, setActiveRun }: { activeRun: ProcessRun; set
           <div className="eyebrow">Инструмент протоколов</div>
           <h1>Инструмент подготовки протоколов</h1>
         </div>
-        <div className="toolbar-actions">
-          <button className="secondary-button" onClick={handleRegenerate}>
-            <RefreshCw size={17} />
-            Пересобрать черновик
-          </button>
-          <button className="primary-button" onClick={handlePublish}>
-            <ArrowUpRight size={17} />
-            Опубликовать
-          </button>
-        </div>
       </section>
 
-      <section className="three-column protocol-layout">
-        <div className="panel">
-          <div className="panel-head">
-            <h2>Протоколы</h2>
-            <Plus size={17} />
-          </div>
-          <div className="session-list">
-            {sampleProtocols.map((item) => (
-              <button className={cx("session-row", item.id === selectedProtocol && "selected")} key={item.id} onClick={() => setSelectedProtocol(item.id)}>
-                <span>{item.title}</span>
-                <small>{item.date} · {item.participants.length} участника</small>
-                <em>{item.status}</em>
-              </button>
-            ))}
-          </div>
+      {error && (
+        <div className="run-result error" style={{ margin: "0 auto 20px auto", width: "100%" }}>
+          <strong>Ошибка генерации</strong>
+          <span>{error}</span>
         </div>
+      )}
 
-        <div className="panel main-panel">
-          <div className="panel-head">
-            <h2>{protocol?.title}</h2>
-            <StatusPill status={activeRun.status} />
-          </div>
-          <div className="protocol-editor">
-            {protocolFields.map((field, index) => (
-              <label key={field}>
-                {field}
-                <input
-                  defaultValue={
-                    index === 0
-                      ? protocol?.title
-                      : index === 1
-                        ? protocol?.date
-                        : index === 2
-                          ? protocol?.participants.join(", ")
-                          : ""
-                  }
-                  placeholder={`Заполнить: ${field.toLowerCase()}`}
-                />
-              </label>
-            ))}
-          </div>
-        </div>
-
-        <aside className="panel inspector">
-          <div className="panel-head">
-            <h2>Решения и задачи</h2>
-            <ListChecks size={17} />
-          </div>
-          <div className="metric-grid">
-            <div>
-              <strong>{protocol?.decisions}</strong>
-              <span>решения</span>
+      <section style={{ padding: "24px", width: "100%", display: "flex", flexDirection: "column", gap: "20px" }}>
+        {protocol ? (
+          <div className="panel main-panel" style={{ margin: 0, padding: "24px", width: "100%" }}>
+            <div className="panel-head" style={{ marginBottom: "16px" }}>
+              <h2>{protocol.title || "Новый протокол встречи"}</h2>
             </div>
-            <div>
-              <strong>{protocol?.actionItems}</strong>
-              <span>задачи</span>
+
+            <div className="protocol-editor" style={{ display: "flex", flexDirection: "column", gap: "16px", overflowY: "auto", paddingRight: "4px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                <label>
+                  Название встречи
+                  <input
+                    value={protocol.title || ""}
+                    onChange={(e) => handleFieldChange("title", e.target.value)}
+                    placeholder="Заполнить название"
+                  />
+                </label>
+                <label>
+                  Дата встречи
+                  <input
+                    type="date"
+                    value={protocol.date || ""}
+                    onChange={(e) => handleFieldChange("date", e.target.value)}
+                  />
+                </label>
+              </div>
+
+              {/* Зона загрузки медиафайлов */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <span style={{ fontSize: "14px", fontWeight: 700, color: "var(--text)" }}>
+                  Загрузка записи встречи
+                </span>
+
+                <div 
+                  style={{ 
+                    border: "2px dashed var(--line)", 
+                    borderRadius: "var(--border-radius)",
+                    padding: "32px 16px",
+                    textAlign: "center",
+                    background: "var(--bg)",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: "8px",
+                    cursor: "pointer",
+                    position: "relative"
+                  }}
+                  onClick={() => document.getElementById("audio-video-upload")?.click()}
+                >
+                  <Download size={36} style={{ color: "var(--muted)", marginBottom: "4px" }} />
+                  <span style={{ fontSize: "14px", fontWeight: 600 }}>
+                    {selectedFile ? selectedFile.name : "Выберите аудио или видео файл"}
+                  </span>
+                  <span style={{ fontSize: "12px", color: "var(--muted)" }}>
+                    {selectedFile 
+                      ? `${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB · Нажмите, чтобы заменить` 
+                      : "Поддерживаются MP4, AVI, MKV, MP3, WAV, M4A и др."
+                    }
+                  </span>
+                  
+                  {selectedFile && (
+                    <span style={{ fontSize: "13px", color: "var(--green)", fontWeight: 600, marginTop: "4px" }}>
+                      {mediaDuration 
+                        ? `Длительность: ${Math.floor(mediaDuration / 60)} мин ${Math.round(mediaDuration % 60)} сек · Разбивка на ${chunksCount} ${chunksCount === 1 ? "часть" : chunksCount && chunksCount < 5 ? "части" : "частей"}`
+                        : "Определение длительности файла..."
+                      }
+                    </span>
+                  )}
+                  
+                  <input 
+                    id="audio-video-upload" 
+                    type="file" 
+                    accept="audio/*,video/*" 
+                    style={{ display: "none" }} 
+                    onChange={(e) => {
+                      if (e.target.files?.[0]) {
+                        handleFileSelect(e.target.files[0]);
+                      }
+                    }}
+                  />
+                </div>
+
+                {/* Кнопка "Запустить" */}
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={!selectedFile || isGenerating || chunksCount === null}
+                  onClick={handleRegenerate}
+                  style={{ 
+                    marginTop: "8px",
+                    height: "44px", 
+                    fontSize: "14px", 
+                    fontWeight: 600,
+                    display: "flex", 
+                    alignItems: "center", 
+                    justifyContent: "center", 
+                    gap: "8px",
+                    borderRadius: "var(--border-radius)",
+                    cursor: (!selectedFile || isGenerating || chunksCount === null) ? "not-allowed" : "pointer",
+                    opacity: (!selectedFile || isGenerating || chunksCount === null) ? 0.5 : 1
+                  }}
+                >
+                  <Play size={16} />
+                  Запустить
+                </button>
+                
+                {isGenerating && progressMessage && (
+                  <div style={{ 
+                    background: "var(--bg)", 
+                    border: "1px solid var(--line)", 
+                    borderRadius: "var(--border-radius)", 
+                    padding: "12px 16px",
+                    marginTop: "4px"
+                  }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "6px" }}>
+                      <span style={{ fontWeight: 600 }}>{progressMessage}</span>
+                      {uploadProgress !== null && <span>{uploadProgress}%</span>}
+                    </div>
+                    {uploadProgress !== null && (
+                      <div style={{ height: "6px", background: "var(--line)", borderRadius: "99px", overflow: "hidden" }}>
+                        <div style={{ width: `${uploadProgress}%`, height: "100%", background: "var(--green)", transition: "width 0.3s ease" }} />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Вкладки превью результатов (перенесены ВЫШЕ хода выполнения) */}
+              {(protocol.transcript || isGenerating) && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "16px", marginTop: "8px" }}>
+                  <div style={{ display: "flex", borderBottom: "1px solid var(--line)", paddingBottom: "2px", gap: "16px" }}>
+                    <button
+                      type="button"
+                      disabled={isGenerating && previewTab === "protocol"}
+                      style={{
+                        padding: "8px 4px",
+                        background: "transparent",
+                        border: "none",
+                        borderBottom: previewTab === "protocol" ? "2px solid var(--green)" : "none",
+                        color: previewTab === "protocol" ? "var(--text)" : "var(--muted)",
+                        fontWeight: previewTab === "protocol" ? 700 : 500,
+                        cursor: isGenerating && previewTab === "protocol" ? "not-allowed" : "pointer",
+                        opacity: isGenerating && previewTab === "protocol" ? 0.5 : 1,
+                        fontSize: "14px"
+                      }}
+                      onClick={() => setPreviewTab("protocol")}
+                    >
+                      Превью протокола
+                    </button>
+                    <button
+                      type="button"
+                      style={{
+                        padding: "8px 4px",
+                        background: "transparent",
+                        border: "none",
+                        borderBottom: previewTab === "transcript" ? "2px solid var(--green)" : "none",
+                        color: previewTab === "transcript" ? "var(--text)" : "var(--muted)",
+                        fontWeight: previewTab === "transcript" ? 700 : 500,
+                        cursor: "pointer",
+                        fontSize: "14px"
+                      }}
+                      onClick={() => setPreviewTab("transcript")}
+                    >
+                      Превью стенограммы {isGenerating && " (распознавание...)"}
+                    </button>
+                  </div>
+
+                  {previewTab === "protocol" && !isGenerating ? (
+                    <div className="protocol-preview" style={{ 
+                      padding: "16px", 
+                      background: "var(--bg)", 
+                      borderRadius: "var(--border-radius)", 
+                      border: "1px solid var(--line)", 
+                      display: "flex", 
+                      flexDirection: "column", 
+                      gap: "16px", 
+                      fontSize: "14px", 
+                      lineHeight: "1.6",
+                      maxHeight: "350px",
+                      overflowY: "auto"
+                    }}>
+                      {protocol.theme && (
+                        <div>
+                          <strong style={{ color: "var(--text)", fontSize: "14px", display: "block", marginBottom: "4px" }}>Тема встречи</strong>
+                          <div style={{ color: "var(--muted)" }}>{protocol.theme}</div>
+                        </div>
+                      )}
+                      {protocol.agenda && (
+                        <div>
+                          <strong style={{ color: "var(--text)", fontSize: "14px", display: "block", marginBottom: "4px" }}>Повестка</strong>
+                          <div style={{ whiteSpace: "pre-wrap", color: "var(--muted)" }}>{protocol.agenda}</div>
+                        </div>
+                      )}
+                      {protocol.keyPoints && (
+                        <div>
+                          <strong style={{ color: "var(--text)", fontSize: "14px", display: "block", marginBottom: "4px" }}>Основные тезисы</strong>
+                          <div style={{ whiteSpace: "pre-wrap", color: "var(--muted)" }}>{protocol.keyPoints}</div>
+                        </div>
+                      )}
+                      {protocol.decisionsText && (
+                        <div>
+                          <strong style={{ color: "var(--text)", fontSize: "14px", display: "block", marginBottom: "4px" }}>Принятые решения</strong>
+                          <div style={{ whiteSpace: "pre-wrap", color: "var(--muted)" }}>{protocol.decisionsText}</div>
+                        </div>
+                      )}
+                      {protocol.tasksText && (
+                        <div>
+                          <strong style={{ color: "var(--text)", fontSize: "14px", display: "block", marginBottom: "4px" }}>Задачи к выполнению</strong>
+                          <div style={{ whiteSpace: "pre-wrap", color: "var(--muted)" }}>{protocol.tasksText}</div>
+                        </div>
+                      )}
+                      {(protocol.responsible || protocol.deadlines) && (
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", borderTop: "1px solid var(--line)", paddingTop: "12px" }}>
+                          {protocol.responsible && (
+                            <div>
+                              <strong style={{ color: "var(--text)", fontSize: "13px", display: "block" }}>Ответственные</strong>
+                              <div style={{ color: "var(--muted)" }}>{protocol.responsible}</div>
+                            </div>
+                          )}
+                          {protocol.deadlines && (
+                            <div>
+                              <strong style={{ color: "var(--text)", fontSize: "13px", display: "block" }}>Сроки</strong>
+                              <div style={{ color: "var(--muted)" }}>{protocol.deadlines}</div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {protocol.risks && (
+                        <div style={{ borderTop: "1px solid var(--line)", paddingTop: "12px" }}>
+                          <strong style={{ color: "var(--text)", fontSize: "14px", display: "block", marginBottom: "4px" }}>Выявленные риски</strong>
+                          <div style={{ whiteSpace: "pre-wrap", color: "var(--muted)" }}>{protocol.risks}</div>
+                        </div>
+                      )}
+                      {protocol.attachments && (
+                        <div style={{ borderTop: "1px solid var(--line)", paddingTop: "12px" }}>
+                          <strong style={{ color: "var(--text)", fontSize: "13px", display: "block", marginBottom: "4px" }}>Приложения</strong>
+                          <div style={{ color: "var(--muted)" }}>{protocol.attachments}</div>
+                        </div>
+                      )}
+                    </div>
+                  ) : previewTab === "protocol" && isGenerating ? (
+                    <div style={{ padding: "24px", textAlign: "center", color: "var(--muted)", background: "var(--bg)", borderRadius: "var(--border-radius)", border: "1px solid var(--line)" }}>
+                      <Loader2 className="spin" style={{ margin: "0 auto 12px auto" }} size={24} />
+                      <span style={{ fontSize: "14px", fontWeight: 600, display: "block", marginBottom: "8px" }}>
+                        {extractingProgressText}
+                      </span>
+                      <span>Протокол будет сгенерирован сразу после завершения распознавания речи.</span>
+                    </div>
+                  ) : (
+                    <div style={{
+                      padding: "16px",
+                      background: "var(--bg)",
+                      borderRadius: "var(--border-radius)",
+                      border: "1px solid var(--line)",
+                      fontSize: "13px",
+                      lineHeight: "1.6",
+                      maxHeight: "350px",
+                      overflowY: "auto",
+                      whiteSpace: "pre-wrap",
+                      color: "var(--muted)",
+                      fontFamily: "monospace"
+                    }}>
+                      {protocol.transcript || (isGenerating ? "Ожидание распознавания первой части..." : "Стенограмма пуста.")}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Ход выполнения (перенесен ниже превью) */}
+              {(() => {
+                if (!hasRunStarted) return null;
+                const visibleSteps = (isGenerating || selectedFile)
+                  ? runSteps
+                  : runSteps.filter((step) => step.status === "succeeded");
+                if (visibleSteps.length === 0) return null;
+                return (
+                  <section className="execution-panel panel" style={{ marginTop: "8px", padding: "16px 20px" }}>
+                    <div className="panel-head" style={{ marginBottom: "16px" }}>
+                      <h2 style={{ fontSize: "15px", fontWeight: 700 }}>Ход выполнения</h2>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                      {visibleSteps.map((step) => {
+                        const isStepSucceeded = step.status === "succeeded";
+                        return (
+                          <div 
+                            key={step.id} 
+                            className={cx("graph-node", `node-${step.status}`)}
+                            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px" }}
+                          >
+                            <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+                              <StepIcon status={step.status} />
+                              <div>
+                                <strong style={{ fontSize: "13px", fontWeight: 700 }}>{step.title}</strong>
+                                <span style={{ fontSize: "11px", color: "var(--muted)", marginTop: "2px", display: "block" }}>
+                                  {step.description}
+                                </span>
+                              </div>
+                            </div>
+                            {isStepSucceeded && (
+                              step.id === "transcribe" ? (
+                                <button 
+                                  type="button"
+                                  className="secondary-button" 
+                                  style={{ height: "32px", padding: "0 12px", fontSize: "12px", gap: "6px", cursor: "pointer" }}
+                                  onClick={handleDownloadTranscriptDocx}
+                                >
+                                  <Download size={12} />
+                                  Скачать DOCX
+                                </button>
+                              ) : step.id === "extract" ? (
+                                <button 
+                                  type="button"
+                                  className="secondary-button" 
+                                  style={{ height: "32px", padding: "0 12px", fontSize: "12px", gap: "6px", cursor: "pointer" }}
+                                  onClick={handleDownloadDocx}
+                                >
+                                  <Download size={12} />
+                                  Скачать DOCX
+                                </button>
+                              ) : null
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+                );
+              })()}
             </div>
           </div>
-          <ProcessGraph steps={activeRun.steps} />
-          <RunSummary run={activeRun} />
-        </aside>
+        ) : (
+          <div className="panel loading-line" style={{ padding: "24px", textAlign: "center" }}>
+            Загрузка протокола...
+          </div>
+        )}
       </section>
     </main>
   );
 }
 
-function RunsView({ analyticsRun, protocolRun }: { analyticsRun: ProcessRun; protocolRun: ProcessRun }) {
-  const runs = [analyticsRun, protocolRun];
-  return (
-    <main className="workspace">
-      <section className="toolbar">
-        <div>
-          <div className="eyebrow">Общая платформа</div>
-          <h1>Запуски</h1>
-        </div>
-      </section>
-      <section className="panel">
-        <div className="runs-table">
-          {runs.map((run) => (
-            <RunSummary key={run.id} run={run} />
-          ))}
-        </div>
-      </section>
-    </main>
-  );
-}
-
-function DocumentsView() {
-  return (
-    <main className="workspace">
-      <section className="toolbar">
-        <div>
-          <div className="eyebrow">Публикации Outline</div>
-          <h1>Документы</h1>
-        </div>
-      </section>
-      <section className="documents-grid">
-        {[
-          ["Аналитическая записка", "Аналитическая записка День 1", "черновик"],
-          ["NPS отчет", "NPS отчет", "создано"],
-          ["Протокол", "Протокол встречи", "опубликовано"]
-        ].map(([type, title, status]) => (
-          <article className="document-card" key={title}>
-            <FileText size={20} />
-            <strong>{title}</strong>
-            <span>{type}</span>
-            <em>{status}</em>
-          </article>
-        ))}
-      </section>
-    </main>
-  );
-}
 
 function PromptsView({
+  workspace,
   promptSettings,
   setPromptSettings
 }: {
-  promptSettings: Record<AnalyticsBlockId, string>;
-  setPromptSettings: Dispatch<SetStateAction<Record<AnalyticsBlockId, string>>>;
+  workspace: "analytics" | "protocols";
+  promptSettings: Record<string, string>;
+  setPromptSettings: Dispatch<SetStateAction<Record<string, string>>>;
 }) {
-  const [activeTab, setActiveTab] = useState<AnalyticsBlockId>("day1");
+  const blocks = useMemo(() => {
+    if (workspace === "analytics") {
+      return [
+        { id: "day1", title: "День 1", description: "Анализ анкет обратной связи участников за День 1" },
+        { id: "day2", title: "День 2", description: "Анализ анкет обратной связи участников за День 2" },
+        { id: "overall", title: "Синтез (Общий)", description: "Синтез результатов первого и второго дня стратегической сессии" },
+        { id: "products", title: "Продукты", description: "Анализ предложенных концепций цифровых продуктов" },
+        { id: "infographic", title: "Инфографика", description: "Итоговая разметка для дашборда-инфографики" }
+      ];
+    } else {
+      return [
+        { id: "protocol.meeting", title: "Шаблон протокола", description: "Анализ стенограммы встречи и формирование протокола" },
+        { id: "protocol.transcript", title: "Шаблон стенограммы", description: "Транскрибация аудиофайла и разделение по спикерам" },
+        { id: "protocol.session", title: "Шаблон сессии", description: "Анализ результатов рабочей сессии" }
+      ];
+    }
+  }, [workspace]);
+
+  const [activeTab, setActiveTab] = useState<string>(() => blocks[0].id);
   const [isSaved, setIsSaved] = useState(false);
   const [localPrompts, setLocalPrompts] = useState(promptSettings);
 
@@ -1191,7 +1838,7 @@ function PromptsView({
     }
   }
 
-  const activeBlock = analyticsBlocks.find((b) => b.id === activeTab) ?? analyticsBlocks[0];
+  const activeBlock = blocks.find((b) => b.id === activeTab) ?? blocks[0];
 
   return (
     <main className="workspace">
@@ -1215,7 +1862,7 @@ function PromptsView({
       <section className="three-column" style={{ gridTemplateColumns: "220px minmax(0, 1fr)" }}>
         {/* Left inner tab selector */}
         <div className="panel" style={{ display: "grid", gap: "6px", alignContent: "start", padding: "12px" }}>
-          {analyticsBlocks.filter((block) => isPromptBlock(block.id)).map((block) => (
+          {blocks.map((block) => (
             <button
               key={block.id}
               className={cx("session-row", activeTab === block.id && "selected")}
@@ -1248,7 +1895,7 @@ function PromptsView({
                   lineHeight: "1.5",
                   resize: "vertical"
                 }}
-                value={localPrompts[activeTab]}
+                value={localPrompts[activeTab] || ""}
                 onChange={(event) =>
                   setLocalPrompts((current) => ({
                     ...current,
@@ -1342,7 +1989,7 @@ export default function Home() {
   const [workspace, setWorkspace] = useState<"analytics" | "protocols">("analytics");
   const [section, setSection] = useState<Section>("analytics");
   const [isRailCollapsed, setIsRailCollapsed] = useState(false);
-  const [promptSettings, setPromptSettings] = useState<Record<AnalyticsBlockId, string>>(promptDefaults);
+  const [promptSettings, setPromptSettings] = useState<Record<string, string>>(promptDefaults);
   const [activeAnalyticsRun, setActiveAnalyticsRun] = useState<ProcessRun>(latestAnalyticsRun);
   const [activeProtocolRun, setActiveProtocolRun] = useState<ProcessRun>(latestProtocolRun);
   const [theme, setTheme] = useState<"light" | "dark">("light");
@@ -1378,7 +2025,7 @@ export default function Home() {
     let mounted = true;
     async function loadPrompts() {
       const response = await fetch("/api/settings/prompts");
-      const data = (await response.json()) as { prompts?: Partial<Record<AnalyticsBlockId, string>> };
+      const data = (await response.json()) as { prompts?: Record<string, string> };
       if (mounted) {
         setPromptSettings({
           ...promptDefaults,
@@ -1394,22 +2041,16 @@ export default function Home() {
 
   const activeView = useMemo(() => {
     if (section === "protocols") {
-      return <ProtocolsView activeRun={activeProtocolRun} setActiveRun={setActiveProtocolRun} />;
-    }
-    if (section === "runs") {
-      return <RunsView analyticsRun={activeAnalyticsRun} protocolRun={activeProtocolRun} />;
-    }
-    if (section === "documents") {
-      return <DocumentsView />;
+      return <ProtocolsView activeRun={activeProtocolRun} setActiveRun={setActiveProtocolRun} promptSettings={promptSettings} />;
     }
     if (section === "settings") {
       return <SettingsView />;
     }
     if (section === "prompts") {
-      return <PromptsView promptSettings={promptSettings} setPromptSettings={setPromptSettings} />;
+      return <PromptsView key={workspace} workspace={workspace} promptSettings={promptSettings} setPromptSettings={setPromptSettings} />;
     }
     return <AnalyticsView promptSettings={promptSettings} activeRun={activeAnalyticsRun} setActiveRun={setActiveAnalyticsRun} />;
-  }, [promptSettings, section, activeAnalyticsRun, activeProtocolRun]);
+  }, [promptSettings, section, activeAnalyticsRun, activeProtocolRun, workspace]);
 
   const toggleWorkspace = () => {
     if (workspace === "analytics") {
@@ -1496,13 +2137,9 @@ export default function Home() {
                 <ClipboardList size={18} />
                 <span>Протоколы</span>
               </button>
-              <button className={cx(section === "runs" && "active")} onClick={() => setSection("runs")} title="Запуски">
-                <Activity size={18} />
-                <span>Запуски</span>
-              </button>
-              <button className={cx(section === "documents" && "active")} onClick={() => setSection("documents")} title="Документы">
-                <FileText size={18} />
-                <span>Документы</span>
+              <button className={cx(section === "prompts" && "active")} onClick={() => setSection("prompts")} title="Настройки промптов">
+                <Sparkles size={18} />
+                <span>Настройки промптов</span>
               </button>
             </>
           )}

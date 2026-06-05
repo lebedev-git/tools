@@ -1,5 +1,5 @@
 export interface IntegrationDescriptor {
-  id: "yandex_forms" | "outline" | "llm_provider" | "file_storage" | "image_service";
+  id: "yandex_forms" | "outline" | "llm_provider" | "file_storage" | "image_service" | "gemini_service";
   title: string;
   usedBy: Array<"analytics" | "protocol">;
   requiredEnv: string[];
@@ -23,6 +23,12 @@ export const integrationRegistry: IntegrationDescriptor[] = [
     title: "OpenAI-compatible LLM provider",
     usedBy: ["analytics", "protocol"],
     requiredEnv: ["LLM_BASE_URL", "LLM_API_KEY"]
+  },
+  {
+    id: "gemini_service",
+    title: "Google Gemini 2.5 Flash API",
+    usedBy: ["protocol"],
+    requiredEnv: ["GEMINI_API_KEY"]
   },
   {
     id: "file_storage",
@@ -49,3 +55,4 @@ export {
 } from "./yandexFormsClient";
 export { LlmClient, type ChatCompletionOptions, type ChatMessage } from "./llmClient";
 export { ImageGenerationClient, type ImageGenerationOptions } from "./imageClient";
+export { GeminiClient } from "./geminiClient";

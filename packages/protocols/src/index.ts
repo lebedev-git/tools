@@ -10,6 +10,16 @@ export interface ProtocolRecord {
   participants: string[];
   actionItems: number;
   decisions: number;
+  transcript?: string;
+  theme?: string;
+  agenda?: string;
+  keyPoints?: string;
+  decisionsText?: string;
+  tasksText?: string;
+  responsible?: string;
+  deadlines?: string;
+  risks?: string;
+  attachments?: string;
 }
 
 export const protocolFields = [
@@ -64,26 +74,7 @@ export const protocolSteps: ProcessStep[] = [
   }
 ];
 
-export const sampleProtocols: ProtocolRecord[] = [
-  {
-    id: "protocol-001",
-    title: "Сессия продукта: архитектура 2026",
-    date: "04.06.2026",
-    status: "review",
-    participants: ["Product", "Engineering", "Operations"],
-    actionItems: 7,
-    decisions: 4
-  },
-  {
-    id: "protocol-002",
-    title: "Рабочее совещание по Outline",
-    date: "03.06.2026",
-    status: "published",
-    participants: ["Automation", "Content"],
-    actionItems: 3,
-    decisions: 2
-  }
-];
+export const sampleProtocols: ProtocolRecord[] = [];
 
 export const latestProtocolRun: ProcessRun = {
   id: "protocol-run-001",

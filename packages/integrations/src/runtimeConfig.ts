@@ -6,6 +6,8 @@ export interface RuntimeConfig {
   llmBaseUrl: string;
   llmChatCompletionsPath: string;
   llmApiKey?: string;
+  llmModel?: string;
+  geminiApiKey?: string;
   outlineApiUrl: string;
   outlineApiKey?: string;
   imageServiceUrl: string;
@@ -15,6 +17,7 @@ export interface RuntimeConfig {
 export interface RuntimeConfigStatus {
   yandexForms: boolean;
   llm: boolean;
+  gemini: boolean;
   outline: boolean;
   imageService: boolean;
   storage: boolean;
@@ -29,6 +32,8 @@ export function getRuntimeConfig(env: NodeJS.ProcessEnv = process.env): RuntimeC
     llmBaseUrl: env.LLM_BASE_URL ?? "https://qwen.aikit.club/v1",
     llmChatCompletionsPath: env.LLM_CHAT_COMPLETIONS_PATH ?? "/chat/completions",
     llmApiKey: env.LLM_API_KEY,
+    llmModel: env.LLM_MODEL ?? "qwen3.7-max",
+    geminiApiKey: env.GEMINI_API_KEY,
     outlineApiUrl: env.OUTLINE_API_URL ?? "https://ai.147.45.155.90.sslip.io",
     outlineApiKey: env.OUTLINE_API_KEY,
     imageServiceUrl: env.IMAGE_SERVICE_URL ?? "http://automation-codex-service:3007/codex-internal",
@@ -40,6 +45,7 @@ export function getRuntimeConfigStatus(config: RuntimeConfig = getRuntimeConfig(
   return {
     yandexForms: Boolean(config.yandexFormsAuthHeaderValue),
     llm: Boolean(config.llmApiKey),
+    gemini: Boolean(config.geminiApiKey),
     outline: Boolean(config.outlineApiKey),
     imageService: Boolean(config.imageServiceUrl),
     storage: Boolean(config.storagePath)

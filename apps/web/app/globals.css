@@ -104,6 +104,10 @@ button:disabled {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
+.brand img {
+  filter: brightness(0) invert(1);
+}
+
 .brand svg {
   color: #38bdf8;
   transition: transform 0.2s ease;
@@ -1331,6 +1335,7 @@ nextjs-route-announcer,
 .login-logo img {
   height: 48px;
   object-fit: contain;
+  filter: brightness(0) invert(1);
 }
 
 .login-card h2 {

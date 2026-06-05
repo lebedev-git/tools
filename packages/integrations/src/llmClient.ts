@@ -42,7 +42,7 @@ export class LlmClient {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          model: options.model ?? "qwen3.7-max",
+          model: options.model ?? this.config.llmModel ?? "qwen3.7-max",
           messages: options.messages,
           temperature: options.temperature ?? 0.4,
           max_tokens: options.maxTokens ?? 4096

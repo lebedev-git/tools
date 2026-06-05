@@ -10,7 +10,8 @@ export class ImageGenerationClient {
 
   public async generateImage(options: ImageGenerationOptions): Promise<string> {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000);
+    // 7 minutes = 420000 ms
+    const timeoutId = setTimeout(() => controller.abort(), 420000);
 
     try {
       const response = await fetch(`${this.baseUrl}/images/generations`, {
@@ -20,7 +21,7 @@ export class ImageGenerationClient {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          model: options.model ?? "image-2",
+          model: options.model ?? "gpt-image-2",
           prompt: options.prompt,
           n: 1,
           size: options.size ?? "1024x1024"
@@ -29,7 +30,7 @@ export class ImageGenerationClient {
       });
 
       const body = await response.json() as {
-        data?: Array<{ url?: string }>;
+        data?: Array<{ url?: string; b64_json?: string }>;
         error?: { message?: string };
       };
 
@@ -38,14 +39,15 @@ export class ImageGenerationClient {
       }
 
       const url = body.data?.[0]?.url;
-      if (!url) {
-        throw new Error("Image API did not return an image URL.");
+      const b64 = body.data?.[0]?.b64_json;
+      if (!url && !b64) {
+        throw new Error("Image API did not return an image URL or base64 data.");
       }
 
-      return url;
+      return url || `data:image/png;base64,${b64}`;
     } catch (error: any) {
       if (error.name === "AbortError") {
-        throw new Error("Image generation timed out after 60 seconds.");
+        throw new Error("Image generation timed out after 7 minutes.");
       }
       throw error;
     } finally {

@@ -94,6 +94,66 @@ function buildExtraContextMessage(payload: AnalyticsRunRequest, day2Context: Ret
   };
 }
 
+function extractSectionText(markdown: string, blockId: string): string {
+  const lines = markdown.split("\n");
+  let startIdx = -1;
+  let headerLevel = 1;
+
+  const patterns: Record<string, RegExp> = {
+    day1: /^\s*#+\s*(?:День\s*1)/i,
+    day2: /^\s*#+\s*(?:День\s*2)/i,
+    overall: /^\s*#+\s*(?:Общая\s*аналитика|Синтез|Синтез\s*результатов|Итоговая\s*аналитика)/i,
+    products: /^\s*#+\s*(?:Продукты|Концепции|Концепции\s*продуктов|Цифровые\s*продукты)/i,
+    infographic: /^\s*#+\s*(?:Инфографика|Дашборд|Разметка\s*для\s*дашборда|Разметка)/i
+  };
+
+  const pattern = patterns[blockId];
+  if (!pattern) return markdown;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (pattern.test(line)) {
+      startIdx = i;
+      const match = line.match(/^\s*(#+)/);
+      if (match) {
+        headerLevel = match[1].length;
+      }
+      break;
+    }
+  }
+
+  if (startIdx === -1) {
+    return markdown;
+  }
+
+  const sectionLines: string[] = [];
+  sectionLines.push(lines[startIdx]);
+
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    const line = lines[i];
+    const headerMatch = line.match(/^\s*(#+)\s+/);
+    if (headerMatch) {
+      const level = headerMatch[1].length;
+      if (level <= headerLevel) {
+        break;
+      }
+    }
+    sectionLines.push(line);
+  }
+
+  const sectionText = sectionLines.join("\n").trim();
+  let cleanSectionText = sectionText;
+  if (cleanSectionText.startsWith("#")) {
+    const firstNewline = cleanSectionText.indexOf("\n");
+    if (firstNewline !== -1) {
+      cleanSectionText = cleanSectionText.slice(firstNewline + 1).trim();
+    } else {
+      cleanSectionText = "";
+    }
+  }
+  return cleanSectionText || sectionText;
+}
+
 function buildStageReports(payload: AnalyticsRunRequest, reportMarkdown: string) {
   if (!reportMarkdown) {
     return {};
@@ -103,9 +163,10 @@ function buildStageReports(payload: AnalyticsRunRequest, reportMarkdown: string)
     (payload.selectedBlocks ?? []).map((blockId) => {
       const title = blockTitles[blockId] ?? blockId;
       const files = payload.assetFiles?.[blockId]?.length ? `\n\nЗагруженные файлы: ${payload.assetFiles[blockId].join(", ")}` : "";
+      const sectionContent = extractSectionText(reportMarkdown, blockId);
       return [
         blockId,
-        [`# ${title}`, `Дата День 1: ${payload.day1Date}`, payload.day2Date ? `Дата День 2: ${payload.day2Date}` : null, files, "", reportMarkdown]
+        [`# ${title}`, `Дата День 1: ${payload.day1Date}`, payload.day2Date ? `Дата День 2: ${payload.day2Date}` : null, files, "", sectionContent]
           .filter(Boolean)
           .join("\n")
       ];
@@ -164,7 +225,7 @@ export async function POST(request: Request) {
             messages: [
               {
                 role: "system",
-                content: "Ты — эксперт по визуализации данных и дизайнер дашбордов. Твоя задача — составить детальный визуальный промпт для генератора картинок на основе текстовой инфографики. Напиши подробный промпт на английском языке для генерации красивой, плоской современной инфографики (дашборда 16:9) с чистыми шрифтами, метриками и блоками в деловом технологичном стиле."
+                content: "Ты — эксперт по визуализации данных и дизайнер дашбордов. Твоя задача — составить детальный визуальный промпт для генератора картинок на основе текстовой инфографики. Напиши подробный промпт на английском языке для генерации красивой, плоской современной инфографики (дашборда 16:9) с чистыми шрифтами, метриками и блоками в деловом технологичном стиле. Укажи в промпте конкретные англоязычные надписи для ключевых показателей (например: 'Day 1', 'Day 2', 'NPS', 'Satisfaction', 'Beacon Training'), чтобы нейросеть красиво расположила их на панели."
               },
               {
                 role: "user",
@@ -177,7 +238,7 @@ export async function POST(request: Request) {
 
           infographicImageUrl = await new ImageGenerationClient().generateImage({
             prompt: visualPrompt,
-            model: "image-2"
+            model: "gpt-image-2"
           });
         } catch (imgError) {
           console.error("Failed to generate image:", imgError);

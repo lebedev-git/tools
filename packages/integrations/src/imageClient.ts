@@ -1,3 +1,5 @@
+import { getRuntimeConfig, type RuntimeConfig } from "./runtimeConfig";
+
 export interface ImageGenerationOptions {
   model?: string;
   prompt: string;
@@ -5,23 +7,27 @@ export interface ImageGenerationOptions {
 }
 
 export class ImageGenerationClient {
-  private readonly apiKey = "sk-clb-3APylzCeyo_r4Lapmp_eLgQl5Ul973_z6QLyRWD1L1A";
-  private readonly baseUrl = "https://codex.sale/v1";
+  public constructor(private readonly config: RuntimeConfig = getRuntimeConfig()) {}
 
   public async generateImage(options: ImageGenerationOptions): Promise<string> {
     const controller = new AbortController();
     // 7 minutes = 420000 ms
     const timeoutId = setTimeout(() => controller.abort(), 420000);
 
+    const isInternal = this.config.imageServiceUrl && this.config.imageServiceUrl.includes("automation-codex-service");
+    const baseUrl = isInternal ? this.config.imageServiceUrl : "https://codex.sale/v1";
+    const apiKey = isInternal ? "" : "sk-clb-3APylzCeyo_r4Lapmp_eLgQl5Ul973_z6QLyRWD1L1A";
+    const modelName = options.model ?? (isInternal ? "gpt-5.5" : "gpt-image-2");
+
     try {
-      const response = await fetch(`${this.baseUrl}/images/generations`, {
+      const response = await fetch(`${baseUrl}/images/generations`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${this.apiKey}`,
+          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          model: options.model ?? "gpt-image-2",
+          model: modelName,
           prompt: options.prompt,
           n: 1,
           size: options.size ?? "1024x1024"

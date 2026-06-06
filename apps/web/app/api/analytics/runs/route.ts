@@ -221,11 +221,15 @@ export async function POST(request: Request) {
       // If infographic block is selected, generate the image!
       if (payload.selectedBlocks?.includes("infographic")) {
         try {
+          const systemPrompt = payload.stagePrompts?.infographic && payload.stagePrompts.infographic.trim()
+            ? payload.stagePrompts.infographic.trim()
+            : "Ты — эксперт по визуализации данных и дизайнер дашбордов. Твоя задача — составить детальный визуальный промпт для генератора картинок на основе текстовой инфографики. Напиши подробный промпт на английском языке для генерации красивой, плоской современной инфографики (дашборда 16:9) с чистыми шрифтами, метриками и блоками в деловом технологичном стиле. Укажи в промпте конкретные англоязычные надписи для ключевых показателей (например: 'Day 1', 'Day 2', 'NPS', 'Satisfaction', 'Beacon Training'), чтобы нейросеть красиво расположила их на панели.";
+
           const visualPrompt = await new LlmClient().createChatCompletion({
             messages: [
               {
                 role: "system",
-                content: "Ты — эксперт по визуализации данных и дизайнер дашбордов. Твоя задача — составить детальный визуальный промпт для генератора картинок на основе текстовой инфографики. Напиши подробный промпт на английском языке для генерации красивой, плоской современной инфографики (дашборда 16:9) с чистыми шрифтами, метриками и блоками в деловом технологичном стиле. Укажи в промпте конкретные англоязычные надписи для ключевых показателей (например: 'Day 1', 'Day 2', 'NPS', 'Satisfaction', 'Beacon Training'), чтобы нейросеть красиво расположила их на панели."
+                content: systemPrompt
               },
               {
                 role: "user",
@@ -238,10 +242,10 @@ export async function POST(request: Request) {
 
           infographicImageUrl = await new ImageGenerationClient().generateImage({
             prompt: visualPrompt,
-            model: "gpt-image-2"
+            model: "gpt-5.5"
           });
         } catch (imgError) {
-          console.error("Failed to generate image:", imgError);
+          console.error("Failed to generate image with model gpt-5.5:", imgError);
         }
       }
     }

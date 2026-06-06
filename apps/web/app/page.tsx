@@ -2184,10 +2184,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Floating Action Button settings (fab-settings) */}
-      <button className="fab-settings" title="Настройки платформы" onClick={() => setSection("settings")}>
-        <Settings size={20} />
-      </button>
+
     </div>
   );
 }

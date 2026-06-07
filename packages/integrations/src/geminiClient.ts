@@ -190,4 +190,93 @@ ${prompt}`;
       }
     });
   }
+
+  public async generateVisualPrompt(
+    reportText: string,
+    logoBase64?: string,
+    photoBase64?: string,
+    systemPrompt?: string
+  ): Promise<string> {
+    return this.executeWithRetry(async (apiKey) => {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+      const sysInstruction = systemPrompt || "Ты — эксперт по визуализации данных и дизайнер дашбордов. Твоя задача — составить детальный визуальный промпт для генератора картинок на основе текстовой инфографики. Напиши подробный промпт на английском языке для генерации красивой, плоской современной инфографики (дашборда 16:9) с чистыми шрифтами, метриками и блоками в деловом технологичном стиле. Укажи в промпте конкретные надписи для ключевых показателей на английском языке.";
+
+      const parts: any[] = [
+        {
+          text: `Составь визуальный промпт на основе этого отчета:\n\n${reportText}\n\nПожалуйста, обязательно проанализируй прикрепленный логотип и общую фотографию, чтобы включить их стилистику (цвета логотипа, цветовую гамму, расположение объектов) в визуальный промпт для красивой, современной и плоской инфографики.`
+        }
+      ];
+
+      if (logoBase64) {
+        const cleanBase64 = logoBase64.replace(/^data:.*;base64,/, "");
+        const mimeType = logoBase64.match(/^data:(.*);base64,/)?.[1] || "image/png";
+        parts.push({
+          inlineData: {
+            mimeType,
+            data: cleanBase64
+          }
+        });
+      }
+
+      if (photoBase64) {
+        const cleanBase64 = photoBase64.replace(/^data:.*;base64,/, "");
+        const mimeType = photoBase64.match(/^data:(.*);base64,/)?.[1] || "image/jpeg";
+        parts.push({
+          inlineData: {
+            mimeType,
+            data: cleanBase64
+          }
+        });
+      }
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000);
+
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            contents: [
+              {
+                role: "user",
+                parts
+              }
+            ],
+            systemInstruction: {
+              parts: [
+                {
+                  text: sysInstruction
+                }
+              ]
+            }
+          }),
+          signal: controller.signal
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Gemini generateVisualPrompt API returned status ${response.status}: ${errText}`);
+        }
+
+        const data = await response.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+        if (typeof text !== "string") {
+          throw new Error("Gemini returned an empty or unexpected response for visual prompt generation.");
+        }
+
+        return text.trim();
+      } catch (error: any) {
+        if (error.name === "AbortError") {
+          throw new Error("Gemini visual prompt generation request timed out after 60 seconds.");
+        }
+        throw error;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    });
+  }
 }

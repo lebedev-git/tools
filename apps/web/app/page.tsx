@@ -30,7 +30,7 @@ import {
   User,
   Workflow
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useState, useRef, type Dispatch, type SetStateAction } from "react";
 import { analyticsBlocks, latestAnalyticsRun } from "@tools/analytics";
 import { latestProtocolRun, type ProtocolRecord } from "@tools/protocols";
 import { type ProcessRun, type ProcessStep } from "@tools/core";
@@ -153,6 +153,16 @@ function StepIcon({ status }: { status: ProcessStep["status"] }) {
 
 
 
+function formatTime(seconds?: number) {
+  if (seconds === undefined || seconds === null) return "";
+  if (seconds < 60) {
+    return `${seconds} сек`;
+  }
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}м ${secs}с`;
+}
+
 interface AnalyticsViewProps {
   promptSettings: Record<AnalyticsBlockId, string>;
   activeRun: ProcessRun;
@@ -187,7 +197,37 @@ function AnalyticsView({ promptSettings, activeRun, setActiveRun }: AnalyticsVie
 
   const [npsResult, setNpsResult] = useState<string | null>(null);
   const [npsData, setNpsData] = useState<NpsData | null>(null);
-  const [assetFiles, setAssetFiles] = useState<Record<string, string[]>>({});
+  const [assetFiles, setAssetFiles] = useState<Record<string, Array<{ name: string; type: string; base64: string }>>>({});
+  const [executionTimes, setExecutionTimes] = useState<Record<string, number>>({});
+  const [totalTime, setTotalTime] = useState(0);
+  const stepStartsRef = useRef<Record<string, number>>({});
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    if (isRunning) {
+      const startTime = Date.now();
+      interval = setInterval(() => {
+        const now = Date.now();
+        setTotalTime(Math.round((now - startTime) / 1000));
+        
+        setExecutionTimes((prev) => {
+          const next = { ...prev };
+          runSteps.forEach((step) => {
+            if (step.status === "running") {
+              const start = stepStartsRef.current[step.id];
+              if (start) {
+                next[step.id] = Math.max(1, Math.round((now - start) / 1000));
+              }
+            }
+          });
+          return next;
+        });
+      }, 1000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isRunning, runSteps]);
 
   const loadAvailability = useCallback(async () => {
     setIsLoadingAvailability(true);
@@ -302,11 +342,44 @@ function AnalyticsView({ promptSettings, activeRun, setActiveRun }: AnalyticsVie
     });
   }
 
-  function handleAssetChange(assetId: "products" | "logo" | "generalPhoto" | "infographic", files: FileList | null) {
-    setAssetFiles((current) => ({
-      ...current,
-      [assetId]: files ? Array.from(files).map((file) => file.name) : []
-    }));
+  function fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = (error) => reject(error);
+    });
+  }
+
+  async function handleAssetChange(assetId: "products" | "logo" | "generalPhoto" | "infographic", files: FileList | null) {
+    if (!files) {
+      setAssetFiles((current) => {
+        const next = { ...current };
+        delete next[assetId];
+        return next;
+      });
+      return;
+    }
+
+    const fileList = Array.from(files);
+    try {
+      const fileData = await Promise.all(
+        fileList.map(async (file) => {
+          const base64 = await fileToBase64(file);
+          return {
+            name: file.name,
+            type: file.type,
+            base64
+          };
+        })
+      );
+      setAssetFiles((current) => ({
+        ...current,
+        [assetId]: fileData
+      }));
+    } catch (error) {
+      console.error("Error reading file:", error);
+    }
   }
 
   async function handleRunClick() {
@@ -317,6 +390,11 @@ function AnalyticsView({ promptSettings, activeRun, setActiveRun }: AnalyticsVie
     setIsRunning(true);
     setHasRunStarted(true);
     setRunResult(null);
+    setExecutionTimes({});
+    setTotalTime(0);
+    
+    const now = Date.now();
+    stepStartsRef.current = { "fetch-forms": now };
 
     // Initialize execution steps graph
     const initialSteps: RunStep[] = [
@@ -358,6 +436,13 @@ function AnalyticsView({ promptSettings, activeRun, setActiveRun }: AnalyticsVie
 
     // Start simulations of early stages
     const timeout1 = setTimeout(() => {
+      const now1 = Date.now();
+      setExecutionTimes((prev) => ({
+        ...prev,
+        "fetch-forms": Math.max(1, Math.round((now1 - (stepStartsRef.current["fetch-forms"] || now1)) / 1000))
+      }));
+      stepStartsRef.current["normalize"] = now1;
+
       setRunSteps((prev) => prev.map((s) => {
         if (s.id === "fetch-forms") return { ...s, status: "succeeded" as const };
         if (s.id === "normalize") return { ...s, status: "running" as const };
@@ -375,6 +460,17 @@ function AnalyticsView({ promptSettings, activeRun, setActiveRun }: AnalyticsVie
     }, 1200);
 
     const timeout2 = setTimeout(() => {
+      const now2 = Date.now();
+      setExecutionTimes((prev) => ({
+        ...prev,
+        "normalize": Math.max(1, Math.round((now2 - (stepStartsRef.current["normalize"] || now2)) / 1000))
+      }));
+      
+      const enabledAiBlocks = (["day1", "day2", "overall", "products"] as AnalyticsBlockId[]).filter(id => enabledBlocks.has(id));
+      enabledAiBlocks.forEach(id => {
+        stepStartsRef.current[id] = now2;
+      });
+
       setRunSteps((prev) => prev.map((s) => {
         if (s.id === "normalize") return { ...s, status: "succeeded" as const };
         if (["day1", "day2", "overall", "products"].includes(s.id)) return { ...s, status: "running" as const };
@@ -391,7 +487,43 @@ function AnalyticsView({ promptSettings, activeRun, setActiveRun }: AnalyticsVie
       }));
     }, 2400);
 
+    // Timeout 3: Transition to infographic generation after 25s (when textual reports are likely ready)
+    const timeout3 = setTimeout(() => {
+      const now3 = Date.now();
+      const enabledAiBlocks = (["day1", "day2", "overall", "products"] as AnalyticsBlockId[]).filter(id => enabledBlocks.has(id));
+      
+      setExecutionTimes((prev) => {
+        const next = { ...prev };
+        enabledAiBlocks.forEach(id => {
+          next[id] = Math.max(1, Math.round((now3 - (stepStartsRef.current[id] || now3)) / 1000));
+        });
+        return next;
+      });
+
+      setRunSteps((prev) => prev.map((s) => {
+        if (["day1", "day2", "overall", "products"].includes(s.id)) return { ...s, status: "succeeded" as const };
+        if (s.id === "infographic") {
+          stepStartsRef.current["infographic"] = now3;
+          return { ...s, status: "running" as const };
+        }
+        return s;
+      }));
+
+      setActiveRun((prev) => ({
+        ...prev,
+        progress: 80,
+        steps: prev.steps.map((s) => {
+          if (s.id === "llm") return { ...s, status: "succeeded" as const };
+          if (s.id === "media") return { ...s, status: "running" as const };
+          return s;
+        })
+      }));
+    }, 25000);
+
     try {
+      // 1. Сначала отправляем запрос на текстовый анализ (исключая infographic)
+      const textBlocks = selectedBlocks.filter((b) => b.id !== "infographic" && b.id !== "publish");
+      
       const response = await fetch("/api/analytics/runs", {
         method: "POST",
         headers: {
@@ -401,8 +533,8 @@ function AnalyticsView({ promptSettings, activeRun, setActiveRun }: AnalyticsVie
           reportType: "day1",
           day1Date: currentSession.id,
           day2Date: currentDay2Session?.date,
-          selectedBlocks: selectedBlocks.map((block) => block.id),
-          stagePrompts: Object.fromEntries(selectedBlocks.filter((block) => isPromptBlock(block.id)).map((block) => [block.id, promptSettings[block.id]])),
+          selectedBlocks: textBlocks.map((block) => block.id),
+          stagePrompts: Object.fromEntries(textBlocks.filter((block) => isPromptBlock(block.id)).map((block) => [block.id, promptSettings[block.id]])),
           assetFiles
         })
       });
@@ -421,65 +553,148 @@ function AnalyticsView({ promptSettings, activeRun, setActiveRun }: AnalyticsVie
 
       clearTimeout(timeout1);
       clearTimeout(timeout2);
+      clearTimeout(timeout3);
 
       if (response.ok && (data.status === "ready" || data.status === "no_data")) {
+        const finalNow = Date.now();
+
         // Fast-forward fetch and normalize steps to success, and set LLM steps to success
         setRunSteps((prev) => prev.map((s) => {
           if (s.id === "fetch-forms" || s.id === "normalize" || ["day1", "day2", "overall", "products"].includes(s.id)) {
+            if (s.status === "running" || s.status === "pending") {
+              setExecutionTimes((prevTimes) => ({
+                ...prevTimes,
+                [s.id]: Math.max(1, Math.round((finalNow - (stepStartsRef.current[s.id] || finalNow)) / 1000))
+              }));
+            }
             return { ...s, status: "succeeded" as const };
           }
           return s;
         }));
 
-        // Execute infographic step sequentially if selected
+        // Текстовая аналитика готова! Выводим её, чтобы пользователь мог сразу скачать DOCX
+        setRunResult(data);
+
+        let finalData = { ...data };
+
+        // 2. Если инфографика выбрана, отправляем второй последовательный запрос
         if (enabledBlocks.has("infographic")) {
+          // Переводим infographic в статус running
           setRunSteps((prev) => prev.map((s) => s.id === "infographic" ? { ...s, status: "running" as const } : s));
+          const infographicStart = Date.now();
+          stepStartsRef.current["infographic"] = infographicStart;
+
           setActiveRun((prev) => ({
             ...prev,
-            progress: 80,
+            progress: 85,
             steps: prev.steps.map((s) => {
               if (s.id === "llm") return { ...s, status: "succeeded" as const };
               if (s.id === "media") return { ...s, status: "running" as const };
               return s;
             })
           }));
-          await new Promise((resolve) => setTimeout(resolve, 2500));
-          const imageOk = Boolean(data.infographicImageUrl);
-          setRunSteps((prev) => prev.map((s) => s.id === "infographic" ? { ...s, status: imageOk ? "succeeded" as const : "failed" as const } : s));
+
+          try {
+            const imgResponse = await fetch("/api/analytics/runs", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                reportType: "day1",
+                day1Date: currentSession.id,
+                day2Date: currentDay2Session?.date,
+                selectedBlocks: ["infographic"],
+                stagePrompts: {
+                  infographic: promptSettings["infographic"]
+                },
+                stageReports: data.stageReports, // Передаем контекст отчетов
+                assetFiles
+              })
+            });
+
+            if (imgResponse.ok) {
+              const imgData = (await imgResponse.json()) as AnalyticsRunResult;
+              const imgEnd = Date.now();
+              const imageOk = Boolean(imgData.infographicImageUrl);
+
+              setExecutionTimes((prevTimes) => ({
+                ...prevTimes,
+                "infographic": Math.max(1, Math.round((imgEnd - infographicStart) / 1000))
+              }));
+
+              setRunSteps((prev) => prev.map((s) => s.id === "infographic" ? { ...s, status: imageOk ? "succeeded" as const : "failed" as const } : s));
+              
+              // Объединяем результаты инфографики и текстов
+              finalData = {
+                ...finalData,
+                infographicImageUrl: imgData.infographicImageUrl,
+                stageReports: {
+                  ...finalData.stageReports,
+                  infographic: imgData.stageReports?.infographic
+                }
+              };
+              setRunResult(finalData);
+
+              setActiveRun((prev) => ({
+                ...prev,
+                steps: prev.steps.map((s) => {
+                  if (s.id === "media") return { ...s, status: "succeeded" as const };
+                  return s;
+                })
+              }));
+            } else {
+              throw new Error("Не удалось сгенерировать инфографику.");
+            }
+          } catch (imgErr) {
+            console.error("Failed to generate infographic:", imgErr);
+            setRunSteps((prev) => prev.map((s) => s.id === "infographic" ? { ...s, status: "failed" as const } : s));
+          }
         }
 
-        // Execute publish step sequentially if selected
+        // 3. Выполняем публикацию в Outline, если выбрана
         if (enabledBlocks.has("publish")) {
+          const publishStart = Date.now();
+          stepStartsRef.current["publish"] = publishStart;
+
           setRunSteps((prev) => prev.map((s) => s.id === "publish" ? { ...s, status: "running" as const } : s));
           setActiveRun((prev) => ({
             ...prev,
             progress: 90,
             steps: prev.steps.map((s) => {
+              if (s.id === "media" && enabledBlocks.has("infographic")) return s; // Уже succeeded
               if (s.id === "media") return { ...s, status: "succeeded" as const };
               if (s.id === "publish") return { ...s, status: "running" as const };
               return s;
             })
           }));
+
           await new Promise((resolve) => setTimeout(resolve, 1500));
+          const publishEnd = Date.now();
+          
+          setExecutionTimes((prevTimes) => ({
+            ...prevTimes,
+            "publish": Math.max(1, Math.round((publishEnd - publishStart) / 1000))
+          }));
+
           setRunSteps((prev) => prev.map((s) => s.id === "publish" ? { ...s, status: "succeeded" as const } : s));
         }
 
-        setRunResult(data);
         setIsRunning(false);
 
-        if (data.status === "ready" && data.run) {
+        if (finalData.status === "ready" && finalData.run) {
           setActiveRun({
-            id: data.run.id,
+            id: finalData.run.id,
             toolType: "analytics",
             title: `Аналитика ${formatDate(currentSession.id)}`,
             status: "succeeded",
             progress: 100,
             startedAt: activeRun.startedAt,
-            steps: data.run.steps.map((s) => ({
+            steps: finalData.run.steps.map((s) => ({
               id: s.id,
               title: s.title,
               description: s.description || "",
-              status: s.status
+              status: s.id === "publish" && enabledBlocks.has("publish") ? ("succeeded" as const) : s.status
             }))
           });
         } else {
@@ -491,16 +706,30 @@ function AnalyticsView({ promptSettings, activeRun, setActiveRun }: AnalyticsVie
     } catch (error) {
       clearTimeout(timeout1);
       clearTimeout(timeout2);
+      clearTimeout(timeout3);
+      
+      const errorNow = Date.now();
       setRunResult({
         status: "error",
         message: error instanceof Error ? error.message : "Не удалось запустить аналитику."
       });
-      setRunSteps((prev) => prev.map((s) => {
-        if (s.status === "running" || s.status === "pending") {
-          return { ...s, status: "failed" as const };
-        }
-        return s;
-      }));
+      
+      setRunSteps((prev) => {
+        const nextSteps = prev.map((s) => {
+          if (s.status === "running" || s.status === "pending") {
+            if (s.status === "running") {
+              setExecutionTimes((prevTimes) => ({
+                ...prevTimes,
+                [s.id]: Math.max(1, Math.round((errorNow - (stepStartsRef.current[s.id] || errorNow)) / 1000))
+              }));
+            }
+            return { ...s, status: "failed" as const };
+          }
+          return s;
+        });
+        return nextSteps;
+      });
+      
       setActiveRun((prev) => ({ ...prev, status: "failed" }));
       setIsRunning(false);
     }
@@ -811,7 +1040,7 @@ function AnalyticsView({ promptSettings, activeRun, setActiveRun }: AnalyticsVie
                     <Download size={14} /> Выбрать файл
                   </span>
                   <input multiple type="file" onChange={(event) => handleAssetChange("products", event.target.files)} />
-                  <small>{assetFiles.products?.join(", ") || "Файл не выбран"}</small>
+                  <small>{assetFiles.products?.map((f) => f.name).join(", ") || "Файл не выбран"}</small>
                 </label>
               )}
 
@@ -822,7 +1051,7 @@ function AnalyticsView({ promptSettings, activeRun, setActiveRun }: AnalyticsVie
                     <Download size={14} /> Выбрать файл
                   </span>
                   <input accept="image/*" type="file" onChange={(event) => handleAssetChange("logo", event.target.files)} />
-                  <small>{assetFiles.logo?.join(", ") || "Файл не выбран"}</small>
+                  <small>{assetFiles.logo?.map((f) => f.name).join(", ") || "Файл не выбран"}</small>
                 </label>
               )}
 
@@ -833,7 +1062,7 @@ function AnalyticsView({ promptSettings, activeRun, setActiveRun }: AnalyticsVie
                     <Download size={14} /> Выбрать файл
                   </span>
                   <input accept="image/*" type="file" onChange={(event) => handleAssetChange("generalPhoto", event.target.files)} />
-                  <small>{assetFiles.generalPhoto?.join(", ") || "Файл не выбран"}</small>
+                  <small>{assetFiles.generalPhoto?.map((f) => f.name).join(", ") || "Файл не выбран"}</small>
                 </label>
               )}
             </div>
@@ -843,9 +1072,17 @@ function AnalyticsView({ promptSettings, activeRun, setActiveRun }: AnalyticsVie
         {/* Progress track panel */}
         {hasRunStarted ? (
           <section className="execution-panel panel">
-            <div className="panel-head">
-              <h2>Ход выполнения</h2>
-              <span className="muted">{selectedFlowText}</span>
+            <div className="panel-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <h2>Ход выполнения</h2>
+                <span className="muted">{selectedFlowText}</span>
+              </div>
+              {totalTime > 0 && (
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", background: "rgba(14, 165, 233, 0.15)", border: "1px solid rgba(14, 165, 233, 0.3)", borderRadius: "99px", padding: "6px 14px" }}>
+                  <span style={{ fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--primary)" }}>Общее время:</span>
+                  <strong style={{ fontSize: "14px", fontWeight: 800, color: "var(--primary)" }}>{formatTime(totalTime)}</strong>
+                </div>
+              )}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginTop: "16px" }}>
               {runSteps.map((step) => {
@@ -869,29 +1106,42 @@ function AnalyticsView({ promptSettings, activeRun, setActiveRun }: AnalyticsVie
                         </span>
                       </div>
                     </div>
-                    {isStepSucceeded && hasReport && (
-                      step.id === "infographic" ? (
-                        <a 
-                          href={runResult?.infographicImageUrl} 
-                          target="_blank" 
-                          rel="noreferrer"
-                          className="secondary-button" 
-                          style={{ height: "36px", padding: "0 14px", fontSize: "13px", gap: "6px" }}
-                        >
-                          <Download size={14} />
-                          Открыть инфографику
-                        </a>
-                      ) : (
-                        <button 
-                          className="secondary-button" 
-                          style={{ height: "36px", padding: "0 14px", fontSize: "13px", gap: "6px" }}
-                          onClick={() => handleDownloadResult({ id: step.id as AnalyticsBlockId, title: step.title })}
-                        >
-                          <Download size={14} />
-                          Скачать DOCX
-                        </button>
-                      )
-                    )}
+                    <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+                      {executionTimes[step.id] !== undefined && (
+                        <span style={{ 
+                          fontSize: "12px", 
+                          color: step.status === "running" ? "var(--primary)" : "var(--muted)", 
+                          fontWeight: 700, 
+                          background: step.status === "running" ? "rgba(14, 165, 233, 0.1)" : "rgba(148, 163, 184, 0.08)",
+                          padding: "4px 10px",
+                          borderRadius: "6px"
+                        }}>
+                          {formatTime(executionTimes[step.id])}
+                        </span>
+                      )}
+                      {isStepSucceeded && hasReport && (
+                        step.id === "infographic" ? (
+                          <a 
+                            href={runResult?.infographicImageUrl} 
+                            download="infographic.png"
+                            className="secondary-button" 
+                            style={{ height: "36px", padding: "0 14px", fontSize: "13px", gap: "6px" }}
+                          >
+                            <Download size={14} />
+                            Скачать инфографику
+                          </a>
+                        ) : (
+                          <button 
+                            className="secondary-button" 
+                            style={{ height: "36px", padding: "0 14px", fontSize: "13px", gap: "6px" }}
+                            onClick={() => handleDownloadResult({ id: step.id as AnalyticsBlockId, title: step.title })}
+                          >
+                            <Download size={14} />
+                            Скачать DOCX
+                          </button>
+                        )
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -903,8 +1153,8 @@ function AnalyticsView({ promptSettings, activeRun, setActiveRun }: AnalyticsVie
         {runResult ? (
           <div className={cx("run-result", runResult.status === "error" && "error", runResult.status === "ready" && "success")}>
             <strong>{runResult.status === "ready" ? "Запуск выполнен" : runResult.status === "no_data" ? "Нет данных" : "Ошибка запуска"}</strong>
-            <span>{runResult.message}</span>
-            {runResult.stats ? (
+            {runResult.status !== "ready" && <span>{runResult.message}</span>}
+            {runResult.status !== "ready" && runResult.stats ? (
               <small>
                 Входных: {runResult.stats.inputCount} · Выходных: {runResult.stats.outputCount}
                 {typeof runResult.stats.day2Count === "number" ? ` · День 2: ${runResult.stats.day2Count}` : ""}

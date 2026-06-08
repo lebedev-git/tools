@@ -1,9 +1,20 @@
 import { yandexFormIds } from "@tools/analytics";
 import { formatYandexDate, normalizeYandexValue, YandexFormsClient } from "@tools/integrations";
 
+interface CustomNpsAnswer {
+  answerId: string;
+  created?: string;
+  disabled?: boolean;
+  answers?: Record<string, unknown>;
+}
+
 interface NpsRequest {
   day1Date?: string;
   day2Date?: string;
+  customAnswers?: {
+    day1Output?: { questionList: string[]; answers: CustomNpsAnswer[] };
+    day2?: { questionList: string[]; answers: CustomNpsAnswer[] } | null;
+  };
 }
 
 interface NpsBucket {
@@ -66,39 +77,80 @@ export async function POST(request: Request) {
     const buckets: NpsBucket[] = [];
 
     for (const target of targets) {
-      const response = await client.getAnswers(target.formId);
       const scores: number[] = [];
-      const columns = response.columns ?? [];
 
-      // Find columns related to NPS/score specifically
-      const npsColIndexes: number[] = [];
-      columns.forEach((col, idx) => {
-        const text = (col.text || "").toLowerCase();
-        const slug = (col.slug || "").toLowerCase();
-        if (
-          text.includes("nps") || 
-          text.includes("рекоменд") || 
-          text.includes("насколько готовы") ||
-          text.includes("насколько вы готовы") ||
-          slug.includes("nps") || 
-          slug.includes("score")
-        ) {
-          npsColIndexes.push(idx);
+      let customTargetData = null;
+      if (payload.customAnswers) {
+        if (target.label === "День 1") {
+          customTargetData = payload.customAnswers.day1Output;
+        } else if (target.label === "День 2") {
+          customTargetData = payload.customAnswers.day2;
         }
-      });
+      }
 
-      for (const answer of response.answers ?? []) {
-        if (formatYandexDate(answer.created) !== target.date) {
-          continue;
+      if (customTargetData && customTargetData.answers) {
+        const npsQuestions = (customTargetData.questionList ?? []).filter((q: string) => {
+          const text = q.toLowerCase();
+          return (
+            text.includes("nps") || 
+            text.includes("рекоменд") || 
+            text.includes("насколько готовы") ||
+            text.includes("насколько вы готовы") ||
+            text.includes("score")
+          );
+        });
+
+        for (const answer of customTargetData.answers) {
+          if (answer.disabled) {
+            continue;
+          }
+          if (answer.created && formatYandexDate(answer.created) !== target.date) {
+            continue;
+          }
+
+          for (const q of npsQuestions) {
+            const val = answer.answers?.[q];
+            const score = findScore(val);
+            if (score !== null) {
+              scores.push(score);
+              break;
+            }
+          }
         }
+      } else {
+        const response = await client.getAnswers(target.formId);
+        const columns = response.columns ?? [];
 
-        // Only check matched NPS columns
-        for (const idx of npsColIndexes) {
-          const val = answer.data?.[idx]?.value;
-          const score = findScore(val);
-          if (score !== null) {
-            scores.push(score);
-            break;
+        // Find columns related to NPS/score specifically
+        const npsColIndexes: number[] = [];
+        columns.forEach((col, idx) => {
+          const text = (col.text || "").toLowerCase();
+          const slug = (col.slug || "").toLowerCase();
+          if (
+            text.includes("nps") || 
+            text.includes("рекоменд") || 
+            text.includes("насколько готовы") ||
+            text.includes("насколько вы готовы") ||
+            slug.includes("nps") || 
+            slug.includes("score")
+          ) {
+            npsColIndexes.push(idx);
+          }
+        });
+
+        for (const answer of response.answers ?? []) {
+          if (formatYandexDate(answer.created) !== target.date) {
+            continue;
+          }
+
+          // Only check matched NPS columns
+          for (const idx of npsColIndexes) {
+            const val = answer.data?.[idx]?.value;
+            const score = findScore(val);
+            if (score !== null) {
+              scores.push(score);
+              break;
+            }
           }
         }
       }

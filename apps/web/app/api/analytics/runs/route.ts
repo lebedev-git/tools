@@ -7,6 +7,8 @@ const blockTitles: Record<string, string> = {
   day2: "День 2",
   overall: "Общая аналитика",
   products: "Продукты",
+  "infographic-prompt": "Подготовка промта для инфографики",
+  "infographic-image": "Инфографика",
   infographic: "Инфографика",
   logo: "Логотип",
   generalPhoto: "Общая фото",
@@ -19,6 +21,18 @@ interface AssetFile {
   base64: string;
 }
 
+interface CustomAnswerRow {
+  answerId: string;
+  created: string;
+  answers: Record<string, unknown>;
+  disabled?: boolean;
+}
+
+interface CustomAnswerTable {
+  questionList: string[];
+  answers: CustomAnswerRow[];
+}
+
 interface AnalyticsRunRequest {
   reportType?: "day1";
   day1Date?: string;
@@ -27,6 +41,11 @@ interface AnalyticsRunRequest {
   stagePrompts?: Record<string, string>;
   assetFiles?: Record<string, AssetFile[]>;
   stageReports?: Record<string, string>;
+  customAnswers?: {
+    day1Input?: CustomAnswerTable;
+    day1Output?: CustomAnswerTable;
+    day2?: CustomAnswerTable;
+  };
 }
 
 async function getDocxText(base64Data: string): Promise<string> {
@@ -49,7 +68,7 @@ async function getDocxText(base64Data: string): Promise<string> {
   }
 }
 
-function convertToMarkdownTable(questionList: string[], answers: any[]) {
+function convertToMarkdownTable(questionList: string[], answers: CustomAnswerRow[]) {
   if (!answers.length) {
     return "Нет данных.";
   }
@@ -160,24 +179,70 @@ export async function POST(request: Request) {
   const client = new YandexFormsClient();
 
   try {
-    const [input, output, day2] = await Promise.all([
-      client.getAnswers(yandexFormIds.day1Input),
-      client.getAnswers(yandexFormIds.day1Output),
-      payload.day2Date ? client.getAnswers(yandexFormIds.day2) : Promise.resolve(null)
-    ]);
-    
-    const inputContext = normalizeForm(input, payload.day1Date);
-    const outputContext = normalizeForm(output, payload.day1Date);
-    const day2Context = day2 && payload.day2Date ? normalizeForm(day2, payload.day2Date) : null;
-    
+    let inputContext;
+    let outputContext;
+    let day2Context = null;
+
+    if (payload.customAnswers) {
+      if (payload.customAnswers.day1Input) {
+        const table = payload.customAnswers.day1Input;
+        const enabledAnswers = table.answers.filter(a => !a.disabled);
+        inputContext = {
+          count: enabledAnswers.length,
+          questionList: table.questionList,
+          answers: enabledAnswers,
+          markdownTable: convertToMarkdownTable(table.questionList, enabledAnswers)
+        };
+      } else {
+        const input = await client.getAnswers(yandexFormIds.day1Input);
+        inputContext = normalizeForm(input, payload.day1Date);
+      }
+
+      if (payload.customAnswers.day1Output) {
+        const table = payload.customAnswers.day1Output;
+        const enabledAnswers = table.answers.filter(a => !a.disabled);
+        outputContext = {
+          count: enabledAnswers.length,
+          questionList: table.questionList,
+          answers: enabledAnswers,
+          markdownTable: convertToMarkdownTable(table.questionList, enabledAnswers)
+        };
+      } else {
+        const output = await client.getAnswers(yandexFormIds.day1Output);
+        outputContext = normalizeForm(output, payload.day1Date);
+      }
+
+      if (payload.customAnswers.day2) {
+        const table = payload.customAnswers.day2;
+        const enabledAnswers = table.answers.filter(a => !a.disabled);
+        day2Context = {
+          count: enabledAnswers.length,
+          questionList: table.questionList,
+          answers: enabledAnswers,
+          markdownTable: convertToMarkdownTable(table.questionList, enabledAnswers)
+        };
+      } else if (payload.day2Date) {
+        const day2 = await client.getAnswers(yandexFormIds.day2);
+        day2Context = normalizeForm(day2, payload.day2Date);
+      }
+    } else {
+      const [input, output, day2] = await Promise.all([
+        client.getAnswers(yandexFormIds.day1Input),
+        client.getAnswers(yandexFormIds.day1Output),
+        payload.day2Date ? client.getAnswers(yandexFormIds.day2) : Promise.resolve(null)
+      ]);
+      inputContext = normalizeForm(input, payload.day1Date);
+      outputContext = normalizeForm(output, payload.day1Date);
+      day2Context = day2 && payload.day2Date ? normalizeForm(day2, payload.day2Date) : null;
+    }
+
     const totalAnswers = inputContext.count + outputContext.count + (day2Context?.count ?? 0);
-    
     const stageReports: Record<string, string> = {};
     let infographicImageUrl = "";
     let llmStatus: "succeeded" | "skipped" = "skipped";
+    const blocks = payload.selectedBlocks ?? [];
 
-    if (totalAnswers > 0) {
-      const blocks = payload.selectedBlocks ?? [];
+    if (totalAnswers > 0 || blocks.includes("infographic-prompt") || blocks.includes("infographic-image")) {
       const llm = new LlmClient();
 
       // --- STEP 1: DAY 1 ANALYTICS ---
@@ -229,10 +294,10 @@ export async function POST(request: Request) {
         const systemPromptOverall = payload.stagePrompts?.overall || "Синтезируй результаты первого и второго дня стратегической сессии в единую аналитическую справку на русском языке.";
         const userPromptOverall = [
           "### Результаты аналитики День 1:",
-          stageReports.day1 || "Данные первого дня отсутствуют.",
+          payload.stageReports?.day1 || stageReports.day1 || "Данные первого дня отсутствуют.",
           "",
           "### Результаты аналитики День 2:",
-          stageReports.day2 || "Данные второго дня отсутствуют."
+          payload.stageReports?.day2 || stageReports.day2 || "Данные второго дня отсутствуют."
         ].join("\n");
 
         stageReports.overall = await llm.createChatCompletion({
@@ -266,7 +331,7 @@ export async function POST(request: Request) {
           docxTexts.length ? docxTexts.join("\n\n") : "Файлы по продуктам не были загружены или пусты.",
           "",
           "### Результаты общей аналитики сессии (для контекста):",
-          stageReports.overall || stageReports.day1 || "Контекст сессии отсутствует."
+          payload.stageReports?.overall || stageReports.overall || payload.stageReports?.day1 || stageReports.day1 || "Контекст сессии отсутствует."
         ].join("\n");
 
         stageReports.products = await llm.createChatCompletion({
@@ -280,12 +345,46 @@ export async function POST(request: Request) {
         });
       }
 
-      // --- STEP 5: INFOGRAPHIC PROMPT & GENERATION ---
-      if (blocks.includes("infographic")) {
-        const rawSystemPrompt = payload.stagePrompts?.infographic && payload.stagePrompts.infographic.trim()
-          ? payload.stagePrompts.infographic.trim()
-          : "Собери итоговую разметку для дашборда-инфографики формата 16:9 на основе аналитики сессии.\nРазметка должна строго соответствовать следующей структуре:\n\nЗАГОЛОВОК (ВЕРХНИЙ КОЛОНТИТУЛ):\nТренажёр «МАЯК» | ИИ-грамотность для органов власти [Даты сессии, Город]\n\nЛЕВАЯ КОЛОНКА: ЗАДАЧИ И МЕТРИКИ\nЭффективность программы:\n• NPS День 1: [Значение]\n• NPS День 2: [Значение]\n• Командная согласованность: [Оценка]/10\n• Рост числа инструментов: [На входе] → [На выходе] (+[Разница] за день)\n\nПРАВАЯ КОЛОНКА (ИЛИ НИЖНИЙ БЛОК): КОМПЕТЕНЦИИ И ИНСАЙТЫ\nКОМПЕТЕНЦИИ И НАВЫКИ (Уровень владения ИИ):\n• На входе: [Оценка]/10\n• На выходе: [Оценка]/10 (Рост уверенности в [Коэффициент] раза)\n\nТоп-3 инструментария (Лидеры освоения):\n1. Аналитика и Данные: [Инструмент 1]\n2. Визуал и Презентации: [Инструмент 2]\n3. Креатив и Аудио: [Инструмент 3]\n\nКАЧЕСТВЕННЫЕ ПОКАЗАТЕЛИ (Изменение отношения к ИИ):\n• Кардинально изменилось (Увидели огромный потенциал): [Процент]% ([Доля])\n• Дополнилось (Увидели новые сценарии): [Процент]% ([Доля])\n\nКачественные эффекты:\n• Преодоление страха: [Краткое описание эффекта и количества инструментов].\n• Командная синергия: [Описание формирования единого понятийного поля].\n• Практический результат: [Описание конкретных планов внедрения и автоматизации отчетов].\n\nВизуальное оформление: указать место для логотипа и общего фото участников, цветовой стиль адаптировать под цвета логотипа.";
+      // --- STEP 5: INFOGRAPHIC PROMPT GENERATION ---
+      if (blocks.includes("infographic-prompt")) {
+        const rawSystemPrompt = payload.stagePrompts?.["infographic-prompt"] || payload.stagePrompts?.infographic || "Собери итоговую разметку для дашборда-инфографики формата 16:9 на основе аналитики сессии.";
+        const reportContext = payload.stageReports?.overall || payload.stageReports?.day1 || payload.stageReports?.day2 || stageReports.overall || stageReports.day1 || stageReports.day2 || "Данные сессии отсутствуют.";
         
+        const visualPrompt = await llm.createChatCompletion({
+          messages: [
+            { role: "system", content: rawSystemPrompt },
+            { role: "user", content: `Данные аналитического отчета сессии для заполнения шаблона:\n\n${reportContext}` }
+          ],
+          model: "qwen3.7-max",
+          temperature: 0.4,
+          maxTokens: 4096
+        });
+
+        stageReports["infographic-prompt"] = visualPrompt;
+      }
+
+      // --- STEP 6: INFOGRAPHIC IMAGE GENERATION ---
+      if (blocks.includes("infographic-image")) {
+        const visualPrompt = payload.stageReports?.["infographic-prompt"] || payload.stageReports?.infographic || "";
+        if (!visualPrompt) {
+          throw new Error("Отсутствует промпт для генерации инфографики.");
+        }
+
+        try {
+          infographicImageUrl = await new ImageGenerationClient().generateImage({
+            prompt: visualPrompt,
+            model: "gpt-image-2"
+          });
+          stageReports["infographic-image"] = `Изображение инфографики успешно сгенерировано.`;
+        } catch (imgError) {
+          console.error("Failed to generate image with model gpt-image-2:", imgError);
+          stageReports["infographic-image"] = `Ошибка генерации изображения.`;
+        }
+      }
+
+      // Backward compatibility for standard infographic block
+      if (blocks.includes("infographic")) {
+        const rawSystemPrompt = payload.stagePrompts?.infographic || "Собери итоговую разметку для дашборда-инфографики формата 16:9 на основе аналитики сессии.";
         const reportContext = payload.stageReports?.overall || payload.stageReports?.day1 || payload.stageReports?.day2 || stageReports.overall || stageReports.day1 || stageReports.day2 || "Данные сессии отсутствуют.";
         
         try {
@@ -299,9 +398,6 @@ export async function POST(request: Request) {
             maxTokens: 4096
           });
 
-          console.log("Generated visualPrompt via Qwen:", JSON.stringify(visualPrompt));
-
-          // Генерация картинки по правильной модели
           infographicImageUrl = await new ImageGenerationClient().generateImage({
             prompt: visualPrompt,
             model: "gpt-image-2"
@@ -309,7 +405,7 @@ export async function POST(request: Request) {
           
           stageReports.infographic = `# Инфографика\n\nСгенерирован визуальный промпт:\n${visualPrompt}`;
         } catch (imgError) {
-          console.error("Failed to generate image with model gpt-image-2:", imgError);
+          console.error("Failed to generate image:", imgError);
           stageReports.infographic = `# Инфографика\n\nОшибка генерации изображения.`;
         }
       }
@@ -317,18 +413,25 @@ export async function POST(request: Request) {
       llmStatus = "succeeded";
     }
 
+    const mergedStageReports = {
+      ...payload.stageReports,
+      ...stageReports
+    };
+
     const reportMarkdown = [
-      stageReports.day1,
-      stageReports.day2,
-      stageReports.overall,
-      stageReports.products,
-      stageReports.infographic
+      mergedStageReports.day1,
+      mergedStageReports.day2,
+      mergedStageReports.overall,
+      mergedStageReports.products,
+      mergedStageReports["infographic-prompt"] ? `# Подготовка промта для инфографики\n\n${mergedStageReports["infographic-prompt"]}` : null,
+      mergedStageReports["infographic-image"] ? `# Инфографика\n\n${mergedStageReports["infographic-image"]}` : null,
+      mergedStageReports.infographic
     ]
       .filter(Boolean)
       .join("\n\n---\n\n");
 
     return Response.json({
-      status: totalAnswers > 0 ? "ready" : "no_data",
+      status: (totalAnswers > 0 || blocks.includes("infographic-prompt") || blocks.includes("infographic-image")) ? "ready" : "no_data",
       run: {
         id: `analytics-day1-${payload.day1Date}`,
         toolType: "analytics",
@@ -343,21 +446,21 @@ export async function POST(request: Request) {
         ]
       },
       stats: {
-        inputCount: inputContext.count,
-        outputCount: outputContext.count,
+        inputCount: inputContext?.count ?? 0,
+        outputCount: outputContext?.count ?? 0,
         day2Count: day2Context?.count ?? 0
       },
-      day1Context: {
+      day1Context: inputContext || outputContext ? {
         input: inputContext,
         output: outputContext
-      },
+      } : undefined,
       day2Context,
       reportMarkdown,
       infographicImageUrl,
       stageReports: buildStageReports(payload, stageReports),
       message:
-        totalAnswers > 0
-          ? "Данные из Yandex Forms загружены, LLM отчет сформирован. Следующий шаг: публикация в Outline."
+        (totalAnswers > 0 || blocks.includes("infographic-prompt") || blocks.includes("infographic-image"))
+          ? "Данные обработаны успешно."
           : "За выбранную дату в формах нет ответов."
     });
   } catch (error) {

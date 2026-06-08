@@ -24,11 +24,17 @@ import {
   Play,
   RefreshCw,
   Save,
-  Settings,
   Sparkles,
   Sun,
   User,
-  Workflow
+  Workflow,
+  Eye,
+  EyeOff,
+  Check,
+  Smile,
+  Meh,
+  Frown,
+  X
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, useRef, type Dispatch, type SetStateAction } from "react";
 import { analyticsBlocks, latestAnalyticsRun } from "@tools/analytics";
@@ -75,7 +81,7 @@ interface AnalyticsRunResult {
   message: string;
   reportMarkdown?: string;
   infographicImageUrl?: string;
-  stageReports?: Partial<Record<AnalyticsBlockId, string>>;
+  stageReports?: Partial<Record<string, string>>;
   stats?: {
     inputCount: number;
     outputCount: number;
@@ -114,16 +120,16 @@ const promptDefaults: Record<string, string> = {
   "protocol.transcript": "Сделай дословную и максимально точную транскрибацию этого аудиофайла на русском языке, обязательно разделяя текст по спикерам (диаризация по голосам). Форматируй текст в виде диалога, указывая спикеров, например:\nСпикер 1: [реплика спикера]\nСпикер 2: [реплика спикера]\nИ так далее. Внимательно следи за сменой голосов. Запиши только произнесенный текст встречи, не добавляй от себя никаких комментариев, резюме или вводных фраз."
 };
 
+function getNow(): number {
+  return Date.now();
+}
+
 function formatDate(value?: string) {
   if (!value) {
     return "";
   }
   const [year, month, day] = value.split("-");
   return year && month && day ? `${day}.${month}.${year}` : value;
-}
-
-function isPromptBlock(blockId: AnalyticsBlockId) {
-  return blockId !== "logo" && blockId !== "generalPhoto" && blockId !== "publish";
 }
 
 const platformLayers = [
@@ -163,6 +169,57 @@ function formatTime(seconds?: number) {
   return `${mins}м ${secs}с`;
 }
 
+function renderInlineMarkdown(text: string) {
+  const parts = text.split(/\*\*(.*?)\*\*/g);
+  return parts.map((part, idx) => {
+    if (idx % 2 === 1) {
+      return <strong key={idx}>{part}</strong>;
+    }
+    return part;
+  });
+}
+
+function MarkdownPreview({ text }: { text: string }) {
+  if (!text) return <p style={{ color: "var(--muted)", margin: 0 }}>Превью пусто.</p>;
+
+  const lines = text.split("\n");
+  
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+      {lines.map((line, idx) => {
+        if (line.startsWith("# ")) {
+          return <h1 key={idx} style={{ fontSize: "20px", fontWeight: "800", borderBottom: "1px solid var(--line)", paddingBottom: "4px", margin: "12px 0 6px 0", color: "var(--text)" }}>{line.replace("# ", "")}</h1>;
+        }
+        if (line.startsWith("## ")) {
+          return <h2 key={idx} style={{ fontSize: "16px", fontWeight: "700", margin: "10px 0 4px 0", color: "var(--text)" }}>{line.replace("## ", "")}</h2>;
+        }
+        if (line.startsWith("### ")) {
+          return <h3 key={idx} style={{ fontSize: "14px", fontWeight: "600", margin: "8px 0 4px 0", color: "var(--text)" }}>{line.replace("### ", "")}</h3>;
+        }
+        
+        if (line.startsWith("- ") || line.startsWith("* ")) {
+          const content = line.startsWith("- ") ? line.replace("- ", "") : line.replace("* ", "");
+          return (
+            <ul key={idx} style={{ margin: "2px 0", paddingLeft: "20px" }}>
+              <li style={{ listStyleType: "disc" }}>{renderInlineMarkdown(content)}</li>
+            </ul>
+          );
+        }
+
+        if (line.trim() === "---") {
+          return <hr key={idx} style={{ border: "none", borderTop: "1px solid var(--line)", margin: "12px 0" }} />;
+        }
+
+        if (!line.trim()) {
+          return <div key={idx} style={{ height: "4px" }} />;
+        }
+
+        return <p key={idx} style={{ margin: "2px 0" }}>{renderInlineMarkdown(line)}</p>;
+      })}
+    </div>
+  );
+}
+
 interface AnalyticsViewProps {
   promptSettings: Record<AnalyticsBlockId, string>;
   activeRun: ProcessRun;
@@ -170,6 +227,7 @@ interface AnalyticsViewProps {
 }
 
 function AnalyticsView({ promptSettings, activeRun, setActiveRun }: AnalyticsViewProps) {
+  void activeRun;
   const [selectedSession, setSelectedSession] = useState("");
   const [selectedDay2Date, setSelectedDay2Date] = useState("");
   const [enabledBlocks, setEnabledBlocks] = useState(() => new Set(analyticsBlocks.filter((block) => block.enabled && block.id !== "day2").map((block) => block.id)));
@@ -200,34 +258,205 @@ function AnalyticsView({ promptSettings, activeRun, setActiveRun }: AnalyticsVie
   const [assetFiles, setAssetFiles] = useState<Record<string, Array<{ name: string; type: string; base64: string }>>>({});
   const [executionTimes, setExecutionTimes] = useState<Record<string, number>>({});
   const [totalTime, setTotalTime] = useState(0);
-  const stepStartsRef = useRef<Record<string, number>>({});
+
+  // Scenario Builder & Section Selection states
+  const [useScenarioBuilder, setUseScenarioBuilder] = useState(false);
+  interface ScenarioDataAnswer {
+    answerId: string;
+    created?: string;
+    disabled: boolean;
+    answers: Record<string, string | string[] | undefined>;
+  }
+
+  const [scenarioData, setScenarioData] = useState<{
+    day1Input: { questionList: string[]; answers: ScenarioDataAnswer[] };
+    day1Output: { questionList: string[]; answers: ScenarioDataAnswer[] };
+    day2: { questionList: string[]; answers: ScenarioDataAnswer[] } | null;
+  } | null>(null);
+  const [isLoadingScenario, setIsLoadingScenario] = useState(false);
+  const [scenarioActiveTab, setScenarioActiveTab] = useState<"day1Input" | "day1Output" | "day2">("day1Input");
+  const [useDay1Input, setUseDay1Input] = useState(true);
+  const [useDay1Output, setUseDay1Output] = useState(true);
+  const [isScenarioSaved, setIsScenarioSaved] = useState(true);
+  const [isTableCollapsed, setIsTableCollapsed] = useState(false);
+  const tableContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Preview and Average Timing states
+  const [openPreviews, setOpenPreviews] = useState<Record<string, boolean>>({});
+  const [copiedStepId, setCopiedStepId] = useState<string | null>(null);
+  const [averageTimes, setAverageTimes] = useState<Record<string, number>>({});
+
+  const togglePreview = (stepId: string) => {
+    setOpenPreviews((prev) => ({ ...prev, [stepId]: !prev[stepId] }));
+  };
+
+  // Scroll to first checked row when active tab or data changes
+  useEffect(() => {
+    if (!useScenarioBuilder || !scenarioData || !tableContainerRef.current || isTableCollapsed) return;
+    const activeTable = scenarioData[scenarioActiveTab];
+    if (!activeTable) return;
+    
+    const firstActiveIndex = activeTable.answers.findIndex((ans: { disabled?: boolean }) => !ans.disabled);
+    if (firstActiveIndex === -1) return;
+    
+    const container = tableContainerRef.current;
+    const timer = setTimeout(() => {
+      const rowElement = container.querySelector(`tbody tr:nth-child(${firstActiveIndex + 1})`);
+      if (rowElement instanceof HTMLElement) {
+        container.scrollTop = rowElement.offsetTop - 50;
+      }
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [scenarioActiveTab, scenarioData, useScenarioBuilder, isTableCollapsed]);
+
+  // Load scenario builder answers on date or builder toggle changes
+  useEffect(() => {
+    async function fetchScenarioAnswers() {
+      if (!useScenarioBuilder || !selectedSession) {
+        setScenarioData(null);
+        return;
+      }
+      setIsLoadingScenario(true);
+      try {
+        const url = `/api/analytics/answers?day1Date=${selectedSession}${selectedDay2Date ? `&day2Date=${selectedDay2Date}` : ""}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error("Не удалось загрузить ответы для конструктора сценариев");
+        const data = await res.json();
+        
+        if (data.day1Input) {
+          data.day1Input.answers = data.day1Input.answers.map((ans: { answerId: string; created?: string; answers: Record<string, string | string[] | undefined> }) => ({
+            ...ans,
+            disabled: ans.created ? ans.created.slice(0, 10) !== selectedSession : true
+          }));
+        }
+        if (data.day1Output) {
+          data.day1Output.answers = data.day1Output.answers.map((ans: { answerId: string; created?: string; answers: Record<string, string | string[] | undefined> }) => ({
+            ...ans,
+            disabled: ans.created ? ans.created.slice(0, 10) !== selectedSession : true
+          }));
+        }
+        if (data.day2) {
+          data.day2.answers = data.day2.answers.map((ans: { answerId: string; created?: string; answers: Record<string, string | string[] | undefined> }) => ({
+            ...ans,
+            disabled: ans.created ? ans.created.slice(0, 10) !== selectedDay2Date : true
+          }));
+        }
+        
+        setScenarioData(data);
+      } catch (err) {
+        console.error(err);
+        alert(err instanceof Error ? err.message : "Ошибка при загрузке ответов.");
+      } finally {
+        setIsLoadingScenario(false);
+      }
+    }
+    void fetchScenarioAnswers();
+  }, [useScenarioBuilder, selectedSession, selectedDay2Date]);
+
+
+  const loadAverageTimes = useCallback(() => {
+    try {
+      const historyStr = localStorage.getItem("analytics_runs_history");
+      if (!historyStr) return;
+      const history = JSON.parse(historyStr) as Array<{ durations: Record<string, number> }>;
+      const sums: Record<string, number> = {};
+      const counts: Record<string, number> = {};
+      for (const run of history) {
+        if (!run.durations) continue;
+        for (const [stepId, duration] of Object.entries(run.durations)) {
+          sums[stepId] = (sums[stepId] || 0) + duration;
+          counts[stepId] = (counts[stepId] || 0) + 1;
+        }
+      }
+      const averages: Record<string, number> = {};
+      for (const stepId of Object.keys(sums)) {
+        averages[stepId] = Math.round(sums[stepId] / counts[stepId]);
+      }
+      setAverageTimes(averages);
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
 
   useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
-    if (isRunning) {
-      const startTime = Date.now();
-      interval = setInterval(() => {
-        const now = Date.now();
-        setTotalTime(Math.round((now - startTime) / 1000));
-        
-        setExecutionTimes((prev) => {
-          const next = { ...prev };
-          runSteps.forEach((step) => {
-            if (step.status === "running") {
-              const start = stepStartsRef.current[step.id];
-              if (start) {
-                next[step.id] = Math.max(1, Math.round((now - start) / 1000));
-              }
-            }
-          });
-          return next;
-        });
-      }, 1000);
-    }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [isRunning, runSteps]);
+    loadAverageTimes();
+  }, [loadAverageTimes, runResult]);
+
+  const updateAnswerDisabled = (tab: "day1Input" | "day1Output" | "day2", index: number, disabled: boolean) => {
+    setIsScenarioSaved(false);
+    setScenarioData((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev };
+      const tabData = next[tab];
+      if (!tabData) return prev;
+      const table = { ...tabData };
+      const answers = [...table.answers];
+      answers[index] = { ...answers[index], disabled };
+      table.answers = answers;
+      next[tab] = table;
+      return next;
+    });
+  };
+
+  const updateAnswerValue = (tab: "day1Input" | "day1Output" | "day2", index: number, question: string, value: string) => {
+    setIsScenarioSaved(false);
+    setScenarioData((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev };
+      const tabData = next[tab];
+      if (!tabData) return prev;
+      const table = { ...tabData };
+      const answers = [...table.answers];
+      const ans = { ...answers[index] };
+      const ansAnswers = { ...ans.answers };
+      ansAnswers[question] = value;
+      ans.answers = ansAnswers;
+      answers[index] = ans;
+      table.answers = answers;
+      next[tab] = table;
+      return next;
+    });
+  };
+
+  const addAnswerRow = (tab: "day1Input" | "day1Output" | "day2") => {
+    setIsScenarioSaved(false);
+    setScenarioData((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev };
+      const tabData = next[tab];
+      if (!tabData) return prev;
+      const table = { ...tabData };
+      const answers = [...table.answers];
+      const newAnswersObj: Record<string, string> = {};
+      table.questionList.forEach((q: string) => {
+        newAnswersObj[q] = "";
+      });
+      answers.push({
+        answerId: `temp-${getNow()}`,
+        created: new Date().toISOString(),
+        answers: newAnswersObj,
+        disabled: false
+      });
+      table.answers = answers;
+      next[tab] = table;
+      return next;
+    });
+  };
+
+  const handleResetPage = () => {
+    setRunResult(null);
+    setHasRunStarted(false);
+    setNpsResult(null);
+    setNpsData(null);
+    setExecutionTimes({});
+    setTotalTime(0);
+    setAssetFiles({});
+    setUseScenarioBuilder(false);
+    setScenarioData(null);
+    setIsScenarioSaved(true);
+    setIsTableCollapsed(false);
+    setEnabledBlocks(new Set(analyticsBlocks.filter((block) => block.enabled && block.id !== "day2").map((block) => block.id)));
+  };
 
   const loadAvailability = useCallback(async () => {
     setIsLoadingAvailability(true);
@@ -273,6 +502,27 @@ function AnalyticsView({ promptSettings, activeRun, setActiveRun }: AnalyticsVie
   const hasAssetUploads = enabledBlocks.has("products") || enabledBlocks.has("logo") || enabledBlocks.has("generalPhoto");
   const hasRequiredDates = (!hasDay1Block || Boolean(currentSession)) && (!hasDay2Block || Boolean(currentDay2Session));
   const canRun = hasRequiredDates && selectedBlocks.length > 0 && !isLoadingAvailability;
+
+  const day1InputSelectedCount = useScenarioBuilder && scenarioData?.day1Input
+    ? scenarioData.day1Input.answers.filter((a: { disabled?: boolean }) => !a.disabled).length
+    : (currentSession ? currentSession.day1In : 0);
+
+  const day1OutputSelectedCount = useScenarioBuilder && scenarioData?.day1Output
+    ? scenarioData.day1Output.answers.filter((a: { disabled?: boolean }) => !a.disabled).length
+    : (currentSession ? currentSession.day1Out : 0);
+
+  const day2SelectedCount = useScenarioBuilder && scenarioData?.day2
+    ? scenarioData.day2.answers.filter((a: { disabled?: boolean }) => !a.disabled).length
+    : (currentDay2Session ? currentDay2Session.count : 0);
+
+  // Set the default active tab depending on selected dates
+  useEffect(() => {
+    if (hasDay1Block) {
+      setScenarioActiveTab(useDay1Input ? "day1Input" : "day1Output");
+    } else if (hasDay2Block) {
+      setScenarioActiveTab("day2");
+    }
+  }, [hasDay1Block, hasDay2Block, useDay1Input]);
 
   function isBlockDisabled(blockId: AnalyticsBlockId) {
     const hasAnyDay = enabledBlocks.has("day1") || enabledBlocks.has("day2");
@@ -387,350 +637,233 @@ function AnalyticsView({ promptSettings, activeRun, setActiveRun }: AnalyticsVie
       return;
     }
 
+    const stepsToRun = [];
+    if (enabledBlocks.has("day1")) stepsToRun.push("day1");
+    if (enabledBlocks.has("day2")) stepsToRun.push("day2");
+    if (enabledBlocks.has("overall")) stepsToRun.push("overall");
+    if (enabledBlocks.has("products")) stepsToRun.push("products");
+    if (enabledBlocks.has("infographic")) {
+      stepsToRun.push("infographic-prompt");
+      stepsToRun.push("infographic-image");
+    }
+    if (enabledBlocks.has("publish")) {
+      stepsToRun.push("publish");
+    }
+
+    if (stepsToRun.length === 0) return;
+
     setIsRunning(true);
     setHasRunStarted(true);
     setRunResult(null);
     setExecutionTimes({});
     setTotalTime(0);
     
-    const now = Date.now();
-    stepStartsRef.current = { "fetch-forms": now };
-
     // Initialize execution steps graph
-    const initialSteps: RunStep[] = [
-      { id: "fetch-forms", title: "Загрузка Яндекс Форм", description: "Запрос ответов из Yandex Forms", status: "running" },
-      { id: "normalize", title: "Подготовка данных", description: "Очистка данных и сопоставление ответов", status: "pending" }
-    ];
+    const initialRunSteps = stepsToRun.map(stepId => {
+      let title = "";
+      let description = "";
+      if (stepId === "day1") {
+        title = "ИИ-анализ: День 1";
+        description = "Аналитическая обработка отзывов первого дня";
+      } else if (stepId === "day2") {
+        title = "ИИ-анализ: День 2";
+        description = "Сравнительный анализ отзывов второго дня";
+      } else if (stepId === "overall") {
+        title = "Синтез результатов";
+        description = "Сведение данных первого и второго дней";
+      } else if (stepId === "products") {
+        title = "Анализ продуктов";
+        description = "Анализ концепций цифровых продуктов";
+      } else if (stepId === "infographic-prompt") {
+        title = "Подготовка промта инфографики";
+        description = "Генерация промта по материалам сессии";
+      } else if (stepId === "infographic-image") {
+        title = "Генерация инфографики";
+        description = "Создание дашборда-инфографики";
+      } else if (stepId === "publish") {
+        title = "Публикация в Outline";
+        description = "Сохранение и выгрузка отчетов в Outline";
+      }
+      return { id: stepId, title, description, status: "pending" as const };
+    });
+    
+    setRunSteps(initialRunSteps);
 
-    if (enabledBlocks.has("day1")) {
-      initialSteps.push({ id: "day1", title: "ИИ-анализ: День 1", description: "Аналитическая обработка первого дня сессии", status: "pending" });
-    }
-    if (enabledBlocks.has("day2")) {
-      initialSteps.push({ id: "day2", title: "ИИ-анализ: День 2", description: "Анализ динамики и результатов второго дня", status: "pending" });
-    }
-    if (enabledBlocks.has("overall")) {
-      initialSteps.push({ id: "overall", title: "Синтез результатов", description: "Подготовка общей аналитической справки", status: "pending" });
-    }
-    if (enabledBlocks.has("products")) {
-      initialSteps.push({ id: "products", title: "Анализ концепций продуктов", description: "Анализ цифровых продуктов сессии", status: "pending" });
-    }
-    if (enabledBlocks.has("infographic")) {
-      initialSteps.push({ id: "infographic", title: "Генерация инфографики", description: "Визуализация ключевых метрик сессии", status: "pending" });
-    }
-    if (enabledBlocks.has("publish")) {
-      initialSteps.push({ id: "publish", title: "Публикация в Outline", description: "Сохранение и выгрузка отчетов в Outline", status: "pending" });
-    }
-
-    setRunSteps(initialSteps);
-
-    // Set initial active run metadata status
     setActiveRun({
       ...latestAnalyticsRun,
       status: "running",
       progress: 10,
-      steps: latestAnalyticsRun.steps.map((s: any) => {
-        if (s.id === "fetch-forms") return { ...s, status: "running" as const };
-        return { ...s, status: "pending" as const };
-      })
+      steps: initialRunSteps.map(s => ({ id: s.id, title: s.title, description: s.description, status: "pending" as const }))
     });
+    
+    const startTime = getNow();
+    const stepDurations: Record<string, number> = {};
+    const accumulatedReports: Record<string, string> = {};
+    let accumulatedImageUrl = "";
+    let runAnswersContext = useScenarioBuilder ? scenarioData : null;
+    let finalStats = null;
+    let currentStepId = "";
+    let currentStepStart = 0;
 
-    // Start simulations of early stages
-    const timeout1 = setTimeout(() => {
-      const now1 = Date.now();
-      setExecutionTimes((prev) => ({
-        ...prev,
-        "fetch-forms": Math.max(1, Math.round((now1 - (stepStartsRef.current["fetch-forms"] || now1)) / 1000))
-      }));
-      stepStartsRef.current["normalize"] = now1;
-
-      setRunSteps((prev) => prev.map((s) => {
-        if (s.id === "fetch-forms") return { ...s, status: "succeeded" as const };
-        if (s.id === "normalize") return { ...s, status: "running" as const };
-        return s;
-      }));
-      setActiveRun((prev) => ({
-        ...prev,
-        progress: 30,
-        steps: prev.steps.map((s) => {
-          if (s.id === "fetch-forms") return { ...s, status: "succeeded" as const };
-          if (s.id === "normalize") return { ...s, status: "running" as const };
-          return s;
-        })
-      }));
-    }, 1200);
-
-    const timeout2 = setTimeout(() => {
-      const now2 = Date.now();
-      setExecutionTimes((prev) => ({
-        ...prev,
-        "normalize": Math.max(1, Math.round((now2 - (stepStartsRef.current["normalize"] || now2)) / 1000))
-      }));
-      
-      const enabledAiBlocks = (["day1", "day2", "overall", "products"] as AnalyticsBlockId[]).filter(id => enabledBlocks.has(id));
-      enabledAiBlocks.forEach(id => {
-        stepStartsRef.current[id] = now2;
-      });
-
-      setRunSteps((prev) => prev.map((s) => {
-        if (s.id === "normalize") return { ...s, status: "succeeded" as const };
-        if (["day1", "day2", "overall", "products"].includes(s.id)) return { ...s, status: "running" as const };
-        return s;
-      }));
-      setActiveRun((prev) => ({
-        ...prev,
-        progress: 60,
-        steps: prev.steps.map((s) => {
-          if (s.id === "normalize") return { ...s, status: "succeeded" as const };
-          if (s.id === "llm") return { ...s, status: "running" as const };
-          return s;
-        })
-      }));
-    }, 2400);
-
-    // Timeout 3: Transition to infographic generation after 25s (when textual reports are likely ready)
-    const timeout3 = setTimeout(() => {
-      const now3 = Date.now();
-      const enabledAiBlocks = (["day1", "day2", "overall", "products"] as AnalyticsBlockId[]).filter(id => enabledBlocks.has(id));
-      
-      setExecutionTimes((prev) => {
-        const next = { ...prev };
-        enabledAiBlocks.forEach(id => {
-          next[id] = Math.max(1, Math.round((now3 - (stepStartsRef.current[id] || now3)) / 1000));
-        });
-        return next;
-      });
-
-      setRunSteps((prev) => prev.map((s) => {
-        if (["day1", "day2", "overall", "products"].includes(s.id)) return { ...s, status: "succeeded" as const };
-        if (s.id === "infographic") {
-          stepStartsRef.current["infographic"] = now3;
-          return { ...s, status: "running" as const };
-        }
-        return s;
-      }));
-
-      setActiveRun((prev) => ({
-        ...prev,
-        progress: 80,
-        steps: prev.steps.map((s) => {
-          if (s.id === "llm") return { ...s, status: "succeeded" as const };
-          if (s.id === "media") return { ...s, status: "running" as const };
-          return s;
-        })
-      }));
-    }, 25000);
+    const interval = setInterval(() => {
+      const now = getNow();
+      setTotalTime(Math.max(1, Math.round((now - startTime) / 1000)));
+      if (currentStepId && currentStepStart) {
+        const secs = Math.max(1, Math.round((now - currentStepStart) / 1000));
+        setExecutionTimes(prev => ({ ...prev, [currentStepId]: secs }));
+      }
+    }, 1000);
 
     try {
-      // 1. Сначала отправляем запрос на текстовый анализ (исключая infographic)
-      const textBlocks = selectedBlocks.filter((b) => b.id !== "infographic" && b.id !== "publish");
-      
-      const response = await fetch("/api/analytics/runs", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          reportType: "day1",
-          day1Date: currentSession.id,
-          day2Date: currentDay2Session?.date,
-          selectedBlocks: textBlocks.map((block) => block.id),
-          stagePrompts: Object.fromEntries(textBlocks.filter((block) => isPromptBlock(block.id)).map((block) => [block.id, promptSettings[block.id]])),
-          assetFiles
-        })
-      });
+      for (const stepId of stepsToRun) {
+        currentStepId = stepId;
+        currentStepStart = getNow();
+        
+        setRunSteps(prev => prev.map(s => s.id === stepId ? { ...s, status: "running" as const } : s));
 
-      const data = (await response.json()) as AnalyticsRunResult & {
-        run?: {
-          id: string;
-          steps: Array<{
-            id: string;
-            title: string;
-            description?: string;
-            status: ProcessStep["status"];
-          }>;
-        };
+        if (stepId === "publish") {
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          const duration = Math.max(1, Math.round((getNow() - currentStepStart) / 1000));
+          stepDurations[stepId] = duration;
+          setExecutionTimes(prev => ({ ...prev, [stepId]: duration }));
+          setRunSteps(prev => prev.map(s => s.id === stepId ? { ...s, status: "succeeded" as const } : s));
+          continue;
+        }
+
+        // For Day 1, if we unchecked day1Input or day1Output, let's filter the answers
+        let customAnswersPayload = runAnswersContext;
+        if (stepId === "day1" && runAnswersContext) {
+          customAnswersPayload = {
+            ...runAnswersContext,
+            day1Input: useDay1Input ? runAnswersContext.day1Input : { questionList: [], answers: [] },
+            day1Output: useDay1Output ? runAnswersContext.day1Output : { questionList: [], answers: [] }
+          };
+        }
+
+        const response = await fetch("/api/analytics/runs", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            reportType: "day1",
+            day1Date: currentSession.id,
+            day2Date: currentDay2Session?.date,
+            selectedBlocks: [stepId],
+            stagePrompts: {
+              [stepId === "infographic-prompt" ? "infographic-prompt" : stepId === "infographic-image" ? "infographic-image" : stepId]: 
+                promptSettings[(stepId === "infographic-prompt" || stepId === "infographic-image" ? "infographic" : stepId) as AnalyticsBlockId]
+            },
+            stageReports: accumulatedReports,
+            assetFiles,
+            customAnswers: customAnswersPayload ?? undefined
+          })
+        });
+
+        if (!response.ok) {
+          const errData = await response.json();
+          throw new Error(errData.message || `Ошибка выполнения этапа ${stepId}`);
+        }
+
+        const data = await response.json();
+
+        // Capture context for subsequent requests if not already set
+        if (!runAnswersContext && (data.day1Context || data.day2Context)) {
+          runAnswersContext = {
+            day1Input: data.day1Context?.input || { questionList: [], answers: [] },
+            day1Output: data.day1Context?.output || { questionList: [], answers: [] },
+            day2: data.day2Context || null
+          };
+        }
+
+        if (data.stats) {
+          finalStats = data.stats;
+        }
+
+        const duration = Math.max(1, Math.round((getNow() - currentStepStart) / 1000));
+        stepDurations[stepId] = duration;
+        setExecutionTimes(prev => ({ ...prev, [stepId]: duration }));
+
+        if (data.stageReports) {
+          Object.assign(accumulatedReports, data.stageReports);
+        }
+        if (data.infographicImageUrl) {
+          accumulatedImageUrl = data.infographicImageUrl;
+        }
+
+        setRunResult({
+          status: "ready",
+          message: "Идет обработка шагов...",
+          stageReports: { ...accumulatedReports },
+          infographicImageUrl: accumulatedImageUrl,
+          stats: finalStats || undefined
+        });
+
+        setRunSteps(prev => prev.map(s => s.id === stepId ? { ...s, status: "succeeded" as const } : s));
+      }
+
+      // Merge and set final result
+      const finalReportMarkdown = [
+        accumulatedReports.day1,
+        accumulatedReports.day2,
+        accumulatedReports.overall,
+        accumulatedReports.products,
+        accumulatedReports["infographic-prompt"] ? `# Подготовка промта для инфографики\n\n${accumulatedReports["infographic-prompt"]}` : null,
+        accumulatedReports["infographic-image"] ? `# Инфографика\n\n${accumulatedReports["infographic-image"]}` : null
+      ]
+        .filter(Boolean)
+        .join("\n\n---\n\n");
+
+      const finalResult: AnalyticsRunResult = {
+        status: "ready",
+        message: "Данные обработаны успешно.",
+        reportMarkdown: finalReportMarkdown,
+        infographicImageUrl: accumulatedImageUrl,
+        stageReports: accumulatedReports,
+        stats: finalStats || undefined
       };
 
-      clearTimeout(timeout1);
-      clearTimeout(timeout2);
-      clearTimeout(timeout3);
+      setRunResult(finalResult);
 
-      if (response.ok && (data.status === "ready" || data.status === "no_data")) {
-        const finalNow = Date.now();
-
-        // Fast-forward fetch and normalize steps to success, and set LLM steps to success
-        setRunSteps((prev) => prev.map((s) => {
-          if (s.id === "fetch-forms" || s.id === "normalize" || ["day1", "day2", "overall", "products"].includes(s.id)) {
-            if (s.status === "running" || s.status === "pending") {
-              setExecutionTimes((prevTimes) => ({
-                ...prevTimes,
-                [s.id]: Math.max(1, Math.round((finalNow - (stepStartsRef.current[s.id] || finalNow)) / 1000))
-              }));
-            }
-            return { ...s, status: "succeeded" as const };
-          }
-          return s;
-        }));
-
-        // Текстовая аналитика готова! Выводим её, чтобы пользователь мог сразу скачать DOCX
-        setRunResult(data);
-
-        let finalData = { ...data };
-
-        // 2. Если инфографика выбрана, отправляем второй последовательный запрос
-        if (enabledBlocks.has("infographic")) {
-          // Переводим infographic в статус running
-          setRunSteps((prev) => prev.map((s) => s.id === "infographic" ? { ...s, status: "running" as const } : s));
-          const infographicStart = Date.now();
-          stepStartsRef.current["infographic"] = infographicStart;
-
-          setActiveRun((prev) => ({
-            ...prev,
-            progress: 85,
-            steps: prev.steps.map((s) => {
-              if (s.id === "llm") return { ...s, status: "succeeded" as const };
-              if (s.id === "media") return { ...s, status: "running" as const };
-              return s;
-            })
-          }));
-
-          try {
-            const imgResponse = await fetch("/api/analytics/runs", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json"
-              },
-              body: JSON.stringify({
-                reportType: "day1",
-                day1Date: currentSession.id,
-                day2Date: currentDay2Session?.date,
-                selectedBlocks: ["infographic"],
-                stagePrompts: {
-                  infographic: promptSettings["infographic"]
-                },
-                stageReports: data.stageReports, // Передаем контекст отчетов
-                assetFiles
-              })
-            });
-
-            if (imgResponse.ok) {
-              const imgData = (await imgResponse.json()) as AnalyticsRunResult;
-              const imgEnd = Date.now();
-              const imageOk = Boolean(imgData.infographicImageUrl);
-
-              setExecutionTimes((prevTimes) => ({
-                ...prevTimes,
-                "infographic": Math.max(1, Math.round((imgEnd - infographicStart) / 1000))
-              }));
-
-              setRunSteps((prev) => prev.map((s) => s.id === "infographic" ? { ...s, status: imageOk ? "succeeded" as const : "failed" as const } : s));
-              
-              // Объединяем результаты инфографики и текстов
-              finalData = {
-                ...finalData,
-                infographicImageUrl: imgData.infographicImageUrl,
-                stageReports: {
-                  ...finalData.stageReports,
-                  infographic: imgData.stageReports?.infographic
-                }
-              };
-              setRunResult(finalData);
-
-              setActiveRun((prev) => ({
-                ...prev,
-                steps: prev.steps.map((s) => {
-                  if (s.id === "media") return { ...s, status: "succeeded" as const };
-                  return s;
-                })
-              }));
-            } else {
-              throw new Error("Не удалось сгенерировать инфографику.");
-            }
-          } catch (imgErr) {
-            console.error("Failed to generate infographic:", imgErr);
-            setRunSteps((prev) => prev.map((s) => s.id === "infographic" ? { ...s, status: "failed" as const } : s));
-          }
-        }
-
-        // 3. Выполняем публикацию в Outline, если выбрана
-        if (enabledBlocks.has("publish")) {
-          const publishStart = Date.now();
-          stepStartsRef.current["publish"] = publishStart;
-
-          setRunSteps((prev) => prev.map((s) => s.id === "publish" ? { ...s, status: "running" as const } : s));
-          setActiveRun((prev) => ({
-            ...prev,
-            progress: 90,
-            steps: prev.steps.map((s) => {
-              if (s.id === "media" && enabledBlocks.has("infographic")) return s; // Уже succeeded
-              if (s.id === "media") return { ...s, status: "succeeded" as const };
-              if (s.id === "publish") return { ...s, status: "running" as const };
-              return s;
-            })
-          }));
-
-          await new Promise((resolve) => setTimeout(resolve, 1500));
-          const publishEnd = Date.now();
-          
-          setExecutionTimes((prevTimes) => ({
-            ...prevTimes,
-            "publish": Math.max(1, Math.round((publishEnd - publishStart) / 1000))
-          }));
-
-          setRunSteps((prev) => prev.map((s) => s.id === "publish" ? { ...s, status: "succeeded" as const } : s));
-        }
-
-        setIsRunning(false);
-
-        if (finalData.status === "ready" && finalData.run) {
-          setActiveRun({
-            id: finalData.run.id,
-            toolType: "analytics",
-            title: `Аналитика ${formatDate(currentSession.id)}`,
-            status: "succeeded",
-            progress: 100,
-            startedAt: activeRun.startedAt,
-            steps: finalData.run.steps.map((s) => ({
-              id: s.id,
-              title: s.title,
-              description: s.description || "",
-              status: s.id === "publish" && enabledBlocks.has("publish") ? ("succeeded" as const) : s.status
-            }))
-          });
-        } else {
-          setActiveRun((prev) => ({ ...prev, status: "failed", progress: 100 }));
-        }
-      } else {
-        throw new Error(data.message || "Ошибка генерации отчетов.");
+      // Save to localStorage history since the run completed successfully
+      try {
+        const historyStr = localStorage.getItem("analytics_runs_history") || "[]";
+        const history = JSON.parse(historyStr);
+        history.push({
+          timestamp: getNow(),
+          durations: stepDurations
+        });
+        localStorage.setItem("analytics_runs_history", JSON.stringify(history));
+      } catch (err) {
+        console.error("Failed to save run history to localStorage:", err);
       }
+
+      setActiveRun({
+        id: `analytics-day1-${currentSession.id}`,
+        toolType: "analytics",
+        title: `Аналитика ${formatDate(currentSession.id)}`,
+        status: "succeeded",
+        progress: 100,
+        startedAt: new Date(startTime).toISOString(),
+        steps: initialRunSteps.map(s => ({ id: s.id, title: s.title, description: s.description, status: "succeeded" as const }))
+      });
+
     } catch (error) {
-      clearTimeout(timeout1);
-      clearTimeout(timeout2);
-      clearTimeout(timeout3);
-      
-      const errorNow = Date.now();
+      console.error(error);
+      const errorMessage = error instanceof Error ? error.message : "Ошибка при генерации отчетов.";
       setRunResult({
         status: "error",
-        message: error instanceof Error ? error.message : "Не удалось запустить аналитику."
+        message: errorMessage
       });
-      
-      setRunSteps((prev) => {
-        const nextSteps = prev.map((s) => {
-          if (s.status === "running" || s.status === "pending") {
-            if (s.status === "running") {
-              setExecutionTimes((prevTimes) => ({
-                ...prevTimes,
-                [s.id]: Math.max(1, Math.round((errorNow - (stepStartsRef.current[s.id] || errorNow)) / 1000))
-              }));
-            }
-            return { ...s, status: "failed" as const };
-          }
-          return s;
-        });
-        return nextSteps;
-      });
-      
-      setActiveRun((prev) => ({ ...prev, status: "failed" }));
+
+      setRunSteps(prev => prev.map(s => {
+        if (s.id === currentStepId) return { ...s, status: "failed" as const };
+        return s;
+      }));
+
+      setActiveRun(prev => ({ ...prev, status: "failed", progress: 100 }));
+    } finally {
+      clearInterval(interval);
       setIsRunning(false);
     }
   }
@@ -752,7 +885,8 @@ function AnalyticsView({ promptSettings, activeRun, setActiveRun }: AnalyticsVie
         },
         body: JSON.stringify({
           day1Date: hasDay1Block ? currentSession?.id : undefined,
-          day2Date: hasDay2Block ? currentDay2Session?.date : undefined
+          day2Date: hasDay2Block ? currentDay2Session?.date : undefined,
+          customAnswers: useScenarioBuilder ? scenarioData : undefined
         })
       });
       const data = (await response.json()) as {
@@ -817,6 +951,81 @@ function AnalyticsView({ promptSettings, activeRun, setActiveRun }: AnalyticsVie
     } catch (error) {
       alert(error instanceof Error ? error.message : "Ошибка при скачивании файла.");
     }
+  }
+
+  function handleDownloadPdf(block: { id: string; title: string }) {
+    const content = runResult?.stageReports?.[block.id] ?? runResult?.reportMarkdown;
+    if (!content) return;
+
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      alert("Пожалуйста, разрешите всплывающие окна для экспорта PDF.");
+      return;
+    }
+
+    let htmlContent = content;
+    htmlContent = htmlContent.replace(/^# (.*$)/gim, "<h1>$1</h1>");
+    htmlContent = htmlContent.replace(/^## (.*$)/gim, "<h2>$1</h2>");
+    htmlContent = htmlContent.replace(/^### (.*$)/gim, "<h3>$1</h3>");
+    
+    const lines = htmlContent.split("\n");
+    let inList = false;
+    const formattedLines = lines.map((line: string) => {
+      if (line.startsWith("- ") || line.startsWith("* ")) {
+        const itemText = line.substring(2);
+        let prefix = "";
+        if (!inList) {
+          inList = true;
+          prefix = "<ul>";
+        }
+        return prefix + `<li>${itemText}</li>`;
+      } else {
+        let suffix = "";
+        if (inList) {
+          inList = false;
+          suffix = "</ul>";
+        }
+        return suffix + line;
+      }
+    });
+    if (inList) {
+      formattedLines.push("</ul>");
+    }
+    htmlContent = formattedLines.join("\n");
+    htmlContent = htmlContent.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+    htmlContent = htmlContent.replace(/\n/g, "<br />");
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>${block.title}</title>
+          <style>
+            @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
+            body { font-family: 'Plus Jakarta Sans', sans-serif; padding: 40px; color: #0f172a; line-height: 1.6; background: #ffffff; }
+            h1 { font-size: 26px; font-weight: 800; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; margin-bottom: 20px; color: #0f172a; }
+            h2 { font-size: 20px; font-weight: 700; margin-top: 28px; margin-bottom: 12px; color: #1e293b; }
+            h3 { font-size: 16px; font-weight: 600; margin-top: 20px; margin-bottom: 8px; color: #334155; }
+            ul { margin: 8px 0 16px 0; padding-left: 24px; }
+            li { margin-bottom: 6px; list-style-type: disc; }
+            p { margin: 8px 0; }
+            strong { font-weight: 700; }
+            hr { border: none; border-top: 1px solid #e2e8f0; margin: 24px 0; }
+            @media print { body { padding: 20px; } button { display: none; } }
+          </style>
+        </head>
+        <body>
+          ${htmlContent}
+          <script>
+            window.onload = function() {
+              window.print();
+              setTimeout(function() { window.close(); }, 500);
+            }
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
   }
 
   const blockCardDetails = (blockId: AnalyticsBlockId) => {
@@ -890,7 +1099,7 @@ function AnalyticsView({ promptSettings, activeRun, setActiveRun }: AnalyticsVie
         </div>
 
         {/* Date Selector Row & Main Action Buttons */}
-        <div className="date-controls">
+        <div className="date-controls" style={{ marginBottom: "16px" }}>
           {hasDay1Block ? (
             <div className="session-select-area">
               <button className="session-select-trigger" disabled={isLoadingAvailability} onClick={() => setIsSessionPickerOpen((open) => !open)}>
@@ -968,63 +1177,386 @@ function AnalyticsView({ promptSettings, activeRun, setActiveRun }: AnalyticsVie
             {isCalculatingNps ? <Loader2 className="spin" size={18} /> : <Gauge size={18} />}
           </button>
           {selectedBlocks.length ? (
-            <button className="primary-button run-inline-button" disabled={isRunning || !canRun} onClick={handleRunClick}>
-              {isRunning ? <Loader2 className="spin" size={17} /> : <Play size={17} />}
-              {isRunning ? "Запуск" : "Запустить"}
-            </button>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button className="primary-button run-inline-button" disabled={isRunning || !canRun} onClick={handleRunClick}>
+                {isRunning ? <Loader2 className="spin" size={17} /> : <Play size={17} />}
+                {isRunning ? "Запуск" : "Запустить"}
+              </button>
+              <button className="secondary-button" style={{ height: "42px", padding: "0 18px", display: "inline-flex", alignItems: "center", gap: "8px", border: "1px solid var(--line)", background: "#ffffff" }} onClick={handleResetPage}>
+                Сбросить
+              </button>
+            </div>
           ) : null}
         </div>
 
+        {/* Day sections selection & Settings Row */}
+        {((hasDay1Block && currentSession) || (hasDay2Block && currentDay2Session)) && (
+          <div style={{ display: "flex", gap: "24px", flexWrap: "wrap", alignItems: "center", marginBottom: "16px", padding: "12px 20px", background: "var(--panel-strong)", border: "1px solid var(--line)", borderRadius: "var(--border-radius)" }}>
+            <span style={{ fontSize: "13px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Разделы дня:</span>
+            {hasDay1Block && currentSession && (
+              <>
+                <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", fontWeight: 600 }}>
+                  <input
+                    type="checkbox"
+                    checked={useDay1Input}
+                    onChange={(e) => setUseDay1Input(e.target.checked)}
+                    style={{ width: "16px", height: "16px", cursor: "pointer" }}
+                  />
+                  <span>Раздел 1: Входные анкеты ({day1InputSelectedCount})</span>
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", fontWeight: 600 }}>
+                  <input
+                    type="checkbox"
+                    checked={useDay1Output}
+                    onChange={(e) => setUseDay1Output(e.target.checked)}
+                    style={{ width: "16px", height: "16px", cursor: "pointer" }}
+                  />
+                  <span>Раздел 2: Выходные анкеты ({day1OutputSelectedCount})</span>
+                </label>
+              </>
+            )}
+            {hasDay2Block && currentDay2Session && (
+              <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "default", fontWeight: 600 }}>
+                <input
+                  type="checkbox"
+                  checked={true}
+                  disabled
+                  style={{ width: "16px", height: "16px" }}
+                />
+                <span>Раздел 3: День 2 ({day2SelectedCount})</span>
+              </label>
+            )}
+            
+            <div style={{ width: "1px", height: "18px", background: "var(--line)" }} />
+            
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", fontWeight: 700, color: "var(--accent)" }}>
+                <input
+                  type="checkbox"
+                  checked={useScenarioBuilder}
+                  onChange={(e) => setUseScenarioBuilder(e.target.checked)}
+                  style={{ width: "16px", height: "16px", cursor: "pointer" }}
+                />
+                <span>Расширенный табличный редактор</span>
+              </label>
+              {useScenarioBuilder && (
+                <button
+                  type="button"
+                  onClick={() => setIsTableCollapsed(!isTableCollapsed)}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    padding: "2px",
+                    color: "var(--accent)",
+                    opacity: 0.8
+                  }}
+                  title={isTableCollapsed ? "Развернуть таблицу" : "Свернуть таблицу"}
+                >
+                  {isTableCollapsed ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Scenario Builder Panel */}
+        {useScenarioBuilder && !isTableCollapsed && (
+          <div className="panel" style={{ marginTop: "10px", marginBottom: "24px", minWidth: 0, width: "100%", overflowX: "hidden" }}>
+            <div className="panel-head">
+              <h2>Расширенный табличный редактор</h2>
+              {isLoadingScenario ? <Loader2 className="spin" size={18} /> : <span className="status-pill tone-success">Данные загружены</span>}
+            </div>
+            {isLoadingScenario ? (
+              <div style={{ display: "flex", justifyContent: "center", padding: "40px" }}>
+                <Loader2 className="spin" size={32} />
+              </div>
+            ) : scenarioData ? (
+              <div>
+                {/* Tabs */}
+                <div style={{ display: "flex", gap: "8px", marginBottom: "16px", borderBottom: "1px solid var(--line)", paddingBottom: "8px" }}>
+                  {hasDay1Block && useDay1Input && scenarioData.day1Input && (
+                    <button
+                      className={cx("secondary-button", scenarioActiveTab === "day1Input" && "primary-button")}
+                      style={{ height: "36px", fontSize: "13px", padding: "0 14px" }}
+                      onClick={() => setScenarioActiveTab("day1Input")}
+                    >
+                      Раздел 1: Входные анкеты ({day1InputSelectedCount})
+                    </button>
+                  )}
+                  {hasDay1Block && useDay1Output && scenarioData.day1Output && (
+                    <button
+                      className={cx("secondary-button", scenarioActiveTab === "day1Output" && "primary-button")}
+                      style={{ height: "36px", fontSize: "13px", padding: "0 14px" }}
+                      onClick={() => setScenarioActiveTab("day1Output")}
+                    >
+                      Раздел 2: Выходные анкеты ({day1OutputSelectedCount})
+                    </button>
+                  )}
+                  {hasDay2Block && scenarioData.day2 && (
+                    <button
+                      className={cx("secondary-button", scenarioActiveTab === "day2" && "primary-button")}
+                      style={{ height: "36px", fontSize: "13px", padding: "0 14px" }}
+                      onClick={() => setScenarioActiveTab("day2")}
+                    >
+                      Раздел 3: День 2 ({day2SelectedCount})
+                    </button>
+                  )}
+                </div>
+
+                {/* Active Tab Table */}
+                {(() => {
+                  const activeTable = scenarioData[scenarioActiveTab];
+                  if (!activeTable) return <div style={{ padding: "16px", color: "var(--muted)" }}>Нет данных или раздел отключен</div>;
+
+                  return (
+                    <div>
+                      <div ref={tableContainerRef} style={{ width: "100%", maxWidth: "100%", maxHeight: "500px", overflowX: "auto", overflowY: "auto", border: "1px solid var(--line)", borderRadius: "var(--border-radius)", marginBottom: "16px", background: "#f8fafc" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px", minWidth: "900px" }}>
+                          <thead>
+                            <tr style={{ background: "#f1f5f9", borderBottom: "1px solid var(--line)" }}>
+                              <th style={{ padding: "12px", textAlign: "left", width: "40px" }}>Использовать</th>
+                              <th style={{ padding: "12px", textAlign: "left", width: "50px" }}>#</th>
+                              <th style={{ padding: "12px", textAlign: "left", width: "150px" }}>Дата заполнения</th>
+                              {activeTable.questionList.map((q: string, qIdx: number) => (
+                                <th key={qIdx} style={{ padding: "12px", textAlign: "left", minWidth: "150px", maxWidth: "300px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={q}>
+                                  {q}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {activeTable.answers.map((ans: { answerId: string; created?: string; disabled: boolean; answers: Record<string, string | string[] | undefined> }, idx: number) => {
+                              return (
+                                <tr key={ans.answerId || idx} style={{ borderBottom: "1px solid var(--line)", background: ans.disabled ? "#f1f5f9" : "#ffffff", opacity: ans.disabled ? 0.6 : 1 }}>
+                                  <td style={{ padding: "12px", textAlign: "center" }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={!ans.disabled}
+                                      onChange={(e) => updateAnswerDisabled(scenarioActiveTab, idx, !e.target.checked)}
+                                      style={{ cursor: "pointer", width: "16px", height: "16px" }}
+                                    />
+                                  </td>
+                                  <td style={{ padding: "12px", color: "var(--muted)" }}>{idx + 1}</td>
+                                  <td style={{ padding: "12px", color: "var(--muted)", whiteSpace: "nowrap" }}>
+                                    {ans.created ? new Date(ans.created).toLocaleString("ru-RU", { timeZone: "Europe/Moscow" }) : "—"}
+                                  </td>
+                                  {activeTable.questionList.map((q: string, qIdx: number) => {
+                                    const rawVal = ans.answers[q];
+                                    const displayVal = Array.isArray(rawVal) ? rawVal.join(", ") : (rawVal ?? "");
+                                    return (
+                                      <td key={qIdx} style={{ padding: "6px 8px" }}>
+                                        <input
+                                          type="text"
+                                          value={displayVal}
+                                          disabled={ans.disabled}
+                                          onChange={(e) => updateAnswerValue(scenarioActiveTab, idx, q, e.target.value)}
+                                          style={{
+                                            width: "100%",
+                                            padding: "6px 8px",
+                                            border: "1px solid transparent",
+                                            background: "transparent",
+                                            borderRadius: "4px",
+                                            outline: "none",
+                                            fontSize: "13px"
+                                          }}
+                                          onFocus={(e) => {
+                                            e.target.style.border = "1px solid var(--accent)";
+                                            e.target.style.background = "#ffffff";
+                                          }}
+                                          onBlur={(e) => {
+                                            e.target.style.border = "1px solid transparent";
+                                            e.target.style.background = "transparent";
+                                          }}
+                                        />
+                                      </td>
+                                    );
+                                  })}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+                        <button
+                          className="secondary-button"
+                          style={{ height: "36px", fontSize: "13px", padding: "0 14px" }}
+                          onClick={() => addAnswerRow(scenarioActiveTab)}
+                        >
+                          + Добавить строку
+                        </button>
+                        <button
+                          className="primary-button"
+                          style={{ height: "36px", fontSize: "13px", padding: "0 18px", background: isScenarioSaved ? "#10b981" : "var(--accent)", borderColor: isScenarioSaved ? "#10b981" : "var(--accent)", color: "#ffffff", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                          onClick={() => {
+                            setIsScenarioSaved(true);
+                            alert("Изменения в сценарии успешно сохранены и будут применены при запуске аналитики!");
+                          }}
+                        >
+                          {isScenarioSaved ? <Check size={14} /> : <Save size={14} />}
+                          {isScenarioSaved ? "Сохранено" : "Сохранить изменения"}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            ) : (
+              <div style={{ color: "var(--muted)", padding: "16px" }}>Выберите сессию для отображения таблицы ответов.</div>
+            )}
+          </div>
+        )}
+
         {/* Calculated NPS Visual Cards */}
         {npsData && npsData.results && npsData.results.filter(res => res.total > 0).length > 0 ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "16px", marginBottom: "20px" }}>
-            {npsData.results.filter(res => res.total > 0).map((res: NpsBucketResult, idx: number) => (
-              <div key={idx} className="panel" style={{ margin: 0, padding: "20px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", borderBottom: "1px solid var(--line)", paddingBottom: "12px" }}>
-                  <h3 style={{ margin: 0, fontSize: "14px", fontWeight: 700, color: "var(--text)" }}>{res.label} ({formatDate(res.date)})</h3>
-                  <span className="status-pill tone-success" style={{ fontSize: "10px", padding: "2px 8px" }}>Расчет выполнен</span>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1.5fr", gap: "16px", alignItems: "center" }}>
-                  <div style={{ textAlign: "center", borderRight: "1px solid var(--line)", paddingRight: "12px" }}>
-                    <div style={{ fontSize: "32px", fontWeight: 800, color: res.nps >= 0 ? "var(--green)" : "var(--red)" }}>
-                      {res.nps >= 0 ? `+${res.nps}` : res.nps}
-                    </div>
-                    <div style={{ fontSize: "10px", color: "var(--muted)", fontWeight: 600, marginTop: "2px" }}>
-                      Индекс лояльности (NPS)
-                    </div>
-                    <div style={{ fontSize: "11px", color: "var(--text)", fontWeight: 700, marginTop: "6px" }}>
-                      Всего ответов: {res.total}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "20px", marginBottom: "20px" }}>
+            {npsData.results.filter(res => res.total > 0).map((res: NpsBucketResult, idx: number) => {
+              const promotersPct = res.total > 0 ? Math.round((res.promoters / res.total) * 100) : 0;
+              const passivesPct = res.total > 0 ? Math.round((res.passives / res.total) * 100) : 0;
+              const detractorsPct = res.total > 0 ? Math.round((res.detractors / res.total) * 100) : 0;
+
+              return (
+                <div key={idx} className="panel" style={{ margin: 0, padding: "24px", background: "linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)", border: "1px solid var(--line)", borderRadius: "16px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px", borderBottom: "1px solid rgba(226, 232, 240, 0.8)", paddingBottom: "12px" }}>
+                    <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 800, color: "var(--text)", display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span style={{ display: "inline-block", width: "8px", height: "8px", borderRadius: "50%", background: "var(--accent)" }} />
+                      {res.label} ({formatDate(res.date)})
+                    </h3>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <span className="status-pill tone-success" style={{ fontSize: "11px", padding: "4px 12px", fontWeight: 700, borderRadius: "99px" }}>Расчет выполнен</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNpsData(null);
+                          setNpsResult(null);
+                        }}
+                        style={{
+                          background: "transparent",
+                          border: "none",
+                          cursor: "pointer",
+                          color: "var(--muted)",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          padding: "4px",
+                          borderRadius: "4px",
+                          transition: "background 0.2s"
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = "rgba(0,0,0,0.05)"}
+                        onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                        title="Закрыть"
+                      >
+                        <X size={16} />
+                      </button>
                     </div>
                   </div>
-                  <div>
-                    <div style={{ display: "flex", height: "8px", borderRadius: "99px", overflow: "hidden", marginBottom: "10px" }}>
-                      <div style={{ width: `${res.total > 0 ? (res.promoters / res.total) * 100 : 0}%`, background: "var(--green)" }} title="Промоутеры" />
-                      <div style={{ width: `${res.total > 0 ? (res.passives / res.total) * 100 : 0}%`, background: "var(--yellow)" }} title="Нейтральные" />
-                      <div style={{ width: `${res.total > 0 ? (res.detractors / res.total) * 100 : 0}%`, background: "var(--red)" }} title="Критики" />
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "24px", alignItems: "center" }}>
+                    {/* Left Column: NPS Score */}
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", paddingRight: "24px", borderRight: "1px solid rgba(226, 232, 240, 0.8)" }}>
+                      <div style={{ fontSize: "64px", fontWeight: 800, color: res.nps >= 0 ? "#10b981" : "#ef4444", lineHeight: "1" }}>
+                        {res.nps >= 0 ? `+${res.nps}` : res.nps}
+                      </div>
+                      <div style={{ fontSize: "13px", color: "var(--muted)", fontWeight: 600, marginTop: "8px", letterSpacing: "-0.01em" }}>
+                        Индекс лояльности (NPS)
+                      </div>
+                      <div style={{ 
+                        marginTop: "16px",
+                        background: "#eceaff",
+                        color: "#6c5ce7",
+                        padding: "6px 16px",
+                        borderRadius: "20px",
+                        fontSize: "13px",
+                        fontWeight: 700,
+                        display: "inline-block",
+                        boxShadow: "0 2px 4px rgba(108, 92, 231, 0.08)"
+                      }}>
+                        {res.total} ответов
+                      </div>
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "10px" }}>
-                      <div>
-                        <span style={{ display: "inline-block", width: "6px", height: "6px", borderRadius: "50%", background: "var(--green)", marginRight: "6px" }} />
-                        <strong>Промоутеры:</strong> {res.promoters} ({res.total > 0 ? Math.round((res.promoters / res.total) * 100) : 0}%)
+
+                    {/* Right Column: Categories Stack */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                      {/* Promoters Row */}
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#ffffff", border: "1px solid #f1f5f9", borderRadius: "12px", padding: "12px 18px", boxShadow: "0 2px 4px rgba(0,0,0,0.01)" }}>
+                        <div style={{ display: "flex", alignItems: "center", width: "140px", flexShrink: 0 }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "32px", height: "32px", borderRadius: "50%", border: "1.5px solid #10b981", background: "#ecfdf5", color: "#10b981" }}>
+                            <Smile size={16} strokeWidth={2.5} />
+                          </div>
+                          <span style={{ fontSize: "14px", fontWeight: 700, color: "var(--text)", marginLeft: "12px" }}>Промоутеры</span>
+                        </div>
+                        <div style={{ flex: 1, margin: "0 20px", height: "6px", background: "#f1f5f9", borderRadius: "99px", overflow: "hidden" }}>
+                          <div style={{ width: `${promotersPct}%`, height: "100%", background: "#10b981", borderRadius: "99px" }} />
+                        </div>
+                        <div style={{ fontSize: "14px", fontWeight: 700, color: "var(--text)", width: "65px", textAlign: "right" }}>
+                          {res.promoters} ({promotersPct}%)
+                        </div>
                       </div>
-                      <div>
-                        <span style={{ display: "inline-block", width: "6px", height: "6px", borderRadius: "50%", background: "var(--yellow)", marginRight: "6px" }} />
-                        <strong>Нейтралы:</strong> {res.passives} ({res.total > 0 ? Math.round((res.passives / res.total) * 100) : 0}%)
+
+                      {/* Passives Row */}
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#ffffff", border: "1px solid #f1f5f9", borderRadius: "12px", padding: "12px 18px", boxShadow: "0 2px 4px rgba(0,0,0,0.01)" }}>
+                        <div style={{ display: "flex", alignItems: "center", width: "140px", flexShrink: 0 }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "32px", height: "32px", borderRadius: "50%", border: "1.5px solid #f59e0b", background: "#fffbeb", color: "#f59e0b" }}>
+                            <Meh size={16} strokeWidth={2.5} />
+                          </div>
+                          <span style={{ fontSize: "14px", fontWeight: 700, color: "var(--text)", marginLeft: "12px" }}>Нейтралы</span>
+                        </div>
+                        <div style={{ flex: 1, margin: "0 20px", height: "6px", background: "#f1f5f9", borderRadius: "99px", overflow: "hidden" }}>
+                          <div style={{ width: `${passivesPct}%`, height: "100%", background: "#f59e0b", borderRadius: "99px" }} />
+                        </div>
+                        <div style={{ fontSize: "14px", fontWeight: 700, color: "var(--text)", width: "65px", textAlign: "right" }}>
+                          {res.passives} ({passivesPct}%)
+                        </div>
                       </div>
-                      <div>
-                        <span style={{ display: "inline-block", width: "6px", height: "6px", borderRadius: "50%", background: "var(--red)", marginRight: "6px" }} />
-                        <strong>Критики:</strong> {res.detractors} ({res.total > 0 ? Math.round((res.detractors / res.total) * 100) : 0}%)
+
+                      {/* Detractors Row */}
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#ffffff", border: "1px solid #f1f5f9", borderRadius: "12px", padding: "12px 18px", boxShadow: "0 2px 4px rgba(0,0,0,0.01)" }}>
+                        <div style={{ display: "flex", alignItems: "center", width: "140px", flexShrink: 0 }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "32px", height: "32px", borderRadius: "50%", border: "1.5px solid #ef4444", background: "#fef2f2", color: "#ef4444" }}>
+                            <Frown size={16} strokeWidth={2.5} />
+                          </div>
+                          <span style={{ fontSize: "14px", fontWeight: 700, color: "var(--text)", marginLeft: "12px" }}>Критики</span>
+                        </div>
+                        <div style={{ flex: 1, margin: "0 20px", height: "6px", background: "#f1f5f9", borderRadius: "99px", overflow: "hidden" }}>
+                          <div style={{ width: `${detractorsPct}%`, height: "100%", background: "#ef4444", borderRadius: "99px" }} />
+                        </div>
+                        <div style={{ fontSize: "14px", fontWeight: 700, color: "var(--text)", width: "65px", textAlign: "right" }}>
+                          {res.detractors} ({detractorsPct}%)
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : npsResult ? (
-          <div className="inline-result">
+          <div className="inline-result" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <CheckCircle2 size={18} />
             <span>{npsResult}</span>
+            <button
+              type="button"
+              onClick={() => setNpsResult(null)}
+              style={{
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                color: "var(--muted)",
+                marginLeft: "auto",
+                display: "inline-flex",
+                alignItems: "center",
+                padding: "4px",
+                borderRadius: "4px",
+                transition: "background 0.2s"
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = "rgba(0,0,0,0.05)"}
+              onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+              title="Закрыть"
+            >
+              <X size={16} />
+            </button>
           </div>
         ) : null}
 
@@ -1087,61 +1619,169 @@ function AnalyticsView({ promptSettings, activeRun, setActiveRun }: AnalyticsVie
             <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginTop: "16px" }}>
               {runSteps.map((step) => {
                 const isStepSucceeded = step.status === "succeeded";
-                const hasReport = step.id === "infographic"
+                const isInfographicImage = step.id === "infographic-image" || step.id === "infographic";
+                const stepReportKey = step.id === "infographic-prompt" ? "infographic-prompt" : step.id;
+                const hasReport = isInfographicImage
                   ? Boolean(runResult?.infographicImageUrl)
-                  : Boolean(runResult?.stageReports?.[step.id as AnalyticsBlockId]);
+                  : Boolean(runResult?.stageReports?.[stepReportKey as AnalyticsBlockId] || runResult?.stageReports?.[stepReportKey]);
                 
                 return (
-                  <div 
-                    key={step.id} 
-                    className={cx("graph-node", `node-${step.status}`)}
-                    style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 20px" }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-                      <StepIcon status={step.status} />
-                      <div>
-                        <strong style={{ fontSize: "14px", fontWeight: 700 }}>{step.title}</strong>
-                        <span style={{ fontSize: "12px", color: "var(--muted)", marginTop: "2px", display: "block" }}>
-                          {step.description}
-                        </span>
+                  <div key={step.id} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    <div 
+                      className={cx("graph-node", `node-${step.status}`)}
+                      style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 20px" }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+                        <StepIcon status={step.status} />
+                        <div>
+                          <strong style={{ fontSize: "14px", fontWeight: 700 }}>{step.title}</strong>
+                          <span style={{ fontSize: "12px", color: "var(--muted)", marginTop: "2px", display: "block" }}>
+                            {step.description}
+                          </span>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+                        {step.status === "running" && executionTimes[step.id] !== undefined && (
+                          <span style={{ 
+                            fontSize: "12px", 
+                            color: "var(--primary)", 
+                            fontWeight: 700, 
+                            background: "rgba(14, 165, 233, 0.1)",
+                            padding: "4px 10px",
+                            borderRadius: "6px"
+                          }}>
+                            {formatTime(executionTimes[step.id])}
+                          </span>
+                        )}
+                        {isStepSucceeded && hasReport && (
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            {isInfographicImage ? (
+                              <>
+                                <a 
+                                  href={runResult?.infographicImageUrl} 
+                                  download="infographic.png"
+                                  className="secondary-button" 
+                                  style={{ height: "36px", padding: "0 14px", fontSize: "13px", gap: "6px", display: "inline-flex", alignItems: "center", textDecoration: "none" }}
+                                >
+                                  <Download size={14} />
+                                  Скачать инфографику
+                                </a>
+                                <button 
+                                  className={cx("secondary-button", openPreviews[step.id] && "primary-button")} 
+                                  style={{ height: "36px", padding: "0 14px", fontSize: "13px", gap: "6px" }}
+                                  onClick={() => togglePreview(step.id)}
+                                >
+                                  <Eye size={14} />
+                                  Превью
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button 
+                                  className="secondary-button" 
+                                  style={{ height: "36px", padding: "0 14px", fontSize: "13px", gap: "6px" }}
+                                  onClick={() => handleDownloadResult({ id: stepReportKey as AnalyticsBlockId, title: step.title })}
+                                >
+                                  <Download size={14} />
+                                  Скачать DOCX
+                                </button>
+                                <button 
+                                  className="secondary-button" 
+                                  style={{ height: "36px", padding: "0 14px", fontSize: "13px", gap: "6px" }}
+                                  onClick={() => handleDownloadPdf({ id: stepReportKey, title: step.title })}
+                                >
+                                  <Download size={14} />
+                                  Скачать PDF
+                                </button>
+                                <button 
+                                  className={cx("secondary-button", openPreviews[step.id] && "primary-button")} 
+                                  style={{ height: "36px", padding: "0 14px", fontSize: "13px", gap: "6px" }}
+                                  onClick={() => togglePreview(step.id)}
+                                >
+                                  <Eye size={14} />
+                                  Превью
+                                </button>
+                              </>
+                            )}
+                            <div style={{ marginLeft: "12px", display: "flex", flexDirection: "column", alignItems: "flex-end", fontSize: "11px", color: "var(--muted)", fontWeight: "500" }}>
+                              <span>Время: {executionTimes[step.id] ? formatTime(executionTimes[step.id]) : "—"}</span>
+                              {averageTimes[step.id] && (
+                                <span style={{ color: "var(--accent)" }}>среднее: {formatTime(averageTimes[step.id])}</span>
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-                      {executionTimes[step.id] !== undefined && (
-                        <span style={{ 
-                          fontSize: "12px", 
-                          color: step.status === "running" ? "var(--primary)" : "var(--muted)", 
-                          fontWeight: 700, 
-                          background: step.status === "running" ? "rgba(14, 165, 233, 0.1)" : "rgba(148, 163, 184, 0.08)",
-                          padding: "4px 10px",
-                          borderRadius: "6px"
-                        }}>
-                          {formatTime(executionTimes[step.id])}
-                        </span>
-                      )}
-                      {isStepSucceeded && hasReport && (
-                        step.id === "infographic" ? (
-                          <a 
-                            href={runResult?.infographicImageUrl} 
-                            download="infographic.png"
-                            className="secondary-button" 
-                            style={{ height: "36px", padding: "0 14px", fontSize: "13px", gap: "6px" }}
-                          >
-                            <Download size={14} />
-                            Скачать инфографику
-                          </a>
-                        ) : (
-                          <button 
-                            className="secondary-button" 
-                            style={{ height: "36px", padding: "0 14px", fontSize: "13px", gap: "6px" }}
-                            onClick={() => handleDownloadResult({ id: step.id as AnalyticsBlockId, title: step.title })}
-                          >
-                            <Download size={14} />
-                            Скачать DOCX
-                          </button>
-                        )
-                      )}
-                    </div>
+                    
+                    {/* Expanded Preview Panel */}
+                    {openPreviews[step.id] && hasReport && (
+                      <div
+                        style={{
+                          marginLeft: "32px",
+                          padding: "20px",
+                          background: "var(--panel-strong)",
+                          border: "1px solid var(--line)",
+                          borderRadius: "12px",
+                          boxShadow: "inset 0 2px 4px rgba(0,0,0,0.02)",
+                          position: "relative"
+                        }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                          <span style={{ fontSize: "12px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Превью результата: {step.title}</span>
+                          {!isInfographicImage && (
+                            <button
+                              className="secondary-button"
+                              style={{ height: "30px", padding: "0 12px", fontSize: "12px", gap: "6px" }}
+                              onClick={() => {
+                                const reportText = runResult?.stageReports?.[stepReportKey] || "";
+                                void navigator.clipboard.writeText(reportText);
+                                setCopiedStepId(step.id);
+                                setTimeout(() => setCopiedStepId(null), 2000);
+                              }}
+                            >
+                              {copiedStepId === step.id ? (
+                                <>
+                                  <CheckCircle2 size={12} style={{ color: "var(--green)" }} />
+                                  <span>Скопировано!</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Save size={12} />
+                                  <span>Копировать</span>
+                                </>
+                              )}
+                            </button>
+                          )}
+                        </div>
+                        <div
+                          style={{
+                            padding: "16px",
+                            background: isInfographicImage ? "#f8fafc" : "#ffffff",
+                            border: "1px solid var(--line)",
+                            borderRadius: "8px",
+                            fontSize: "13px",
+                            lineHeight: "1.6",
+                            maxHeight: "650px",
+                            overflowY: "auto",
+                            textAlign: isInfographicImage ? "center" : "left",
+                            display: isInfographicImage ? "flex" : "block",
+                            justifyContent: "center",
+                            alignItems: "center"
+                          }}
+                        >
+                          {isInfographicImage ? (
+                            <img 
+                              src={runResult?.infographicImageUrl || ""} 
+                              style={{ maxWidth: "100%", maxHeight: "600px", borderRadius: "8px", boxShadow: "var(--shadow-sm)", objectFit: "contain" }} 
+                              alt="Инфографика" 
+                            />
+                          ) : (
+                            <MarkdownPreview text={runResult?.stageReports?.[stepReportKey] || ""} />
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -1150,11 +1790,11 @@ function AnalyticsView({ promptSettings, activeRun, setActiveRun }: AnalyticsVie
         ) : null}
 
         {/* Generate results banner */}
-        {runResult ? (
-          <div className={cx("run-result", runResult.status === "error" && "error", runResult.status === "ready" && "success")}>
-            <strong>{runResult.status === "ready" ? "Запуск выполнен" : runResult.status === "no_data" ? "Нет данных" : "Ошибка запуска"}</strong>
-            {runResult.status !== "ready" && <span>{runResult.message}</span>}
-            {runResult.status !== "ready" && runResult.stats ? (
+        {runResult && runResult.status !== "ready" ? (
+          <div className={cx("run-result", runResult.status === "error" && "error")}>
+            <strong>{runResult.status === "no_data" ? "Нет данных" : "Ошибка запуска"}</strong>
+            <span>{runResult.message}</span>
+            {runResult.stats ? (
               <small>
                 Входных: {runResult.stats.inputCount} · Выходных: {runResult.stats.outputCount}
                 {typeof runResult.stats.day2Count === "number" ? ` · День 2: ${runResult.stats.day2Count}` : ""}
@@ -1162,32 +1802,6 @@ function AnalyticsView({ promptSettings, activeRun, setActiveRun }: AnalyticsVie
             ) : null}
           </div>
         ) : null}
-
-        {/* Graphic display of Infographic if ready */}
-        {runResult?.infographicImageUrl && (
-          <div className="panel" style={{ marginTop: "20px", padding: "20px" }}>
-            <div className="panel-head">
-              <h2>Сгенерированная инфографика (Модель: Image-2)</h2>
-              <span className="status-pill tone-success">Готово</span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "center", background: "#f8fafc", borderRadius: "var(--border-radius)", padding: "16px", border: "1px solid var(--line)" }}>
-              <img 
-                src={runResult.infographicImageUrl} 
-                style={{ maxWidth: "100%", maxHeight: "500px", borderRadius: "8px", boxShadow: "var(--shadow-lg)", objectFit: "contain" }} 
-                alt="Инфографика" 
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Footer summary trace */}
-        <div className="selected-flow">
-          <div>
-            <strong>Выбрано блоков: {selectedBlocks.length}</strong>
-            <span>{selectedFlowText}</span>
-          </div>
-          <Workflow size={22} />
-        </div>
       </section>
     </main>
   );

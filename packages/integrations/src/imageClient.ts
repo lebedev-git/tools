@@ -6,6 +6,7 @@ export interface ImageGenerationOptions {
   model?: string;
   prompt: string;
   size?: string;
+  quality?: string;
 }
 
 export class ImageGenerationClient {
@@ -24,7 +25,8 @@ export class ImageGenerationClient {
       model: modelName,
       prompt: options.prompt,
       n: 1,
-      size: options.size ?? "1024x1024"
+      size: options.size ?? "1024x1024",
+      ...(options.quality ? { quality: options.quality } : {})
     });
 
     return new Promise<string>((resolve, reject) => {

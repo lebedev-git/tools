@@ -1825,11 +1825,12 @@ function ProtocolsView({
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [previewTab, setPreviewTab] = useState<"protocol" | "transcript">("transcript");
   const [protocolType, setProtocolType] = useState<"meeting" | "session">("meeting");
-  const [isRegular, setIsRegular] = useState(false);
+  const [meetingFormat, setMeetingFormat] = useState<"regular" | "free">("regular");
   const [selectedParticipants, setSelectedParticipants] = useState<string[]>([]);
   const [customParticipants, setCustomParticipants] = useState("");
+  const [isAddParticipantOpen, setIsAddParticipantOpen] = useState(false);
 
-  const dbParticipants = useMemo(() => ["Антон Актуганов", "Андрей Лебедев", "Колесникова Софья"], []);
+  const dbParticipants = useMemo(() => ["Антон А.", "Андрей Л.", "Колесникова С."], []);
 
   const [chunksCount, setChunksCount] = useState<number | null>(null);
   const [mediaDuration, setMediaDuration] = useState<number | null>(null);
@@ -1856,7 +1857,7 @@ function ProtocolsView({
             title: "Новый протокол встречи",
             date: new Date().toISOString().substring(0, 10),
             status: "draft" as const,
-            participants: ["Администратор"],
+            participants: ["Антон А.", "Андрей Л.", "Колесникова С."],
             actionItems: 0,
             decisions: 0,
             transcript: "",
@@ -1907,9 +1908,22 @@ function ProtocolsView({
       const custom = parts.filter(p => !dbParticipants.includes(p)).join(", ");
       setSelectedParticipants(selected);
       setCustomParticipants(custom);
-      setIsRegular(selected.length > 0);
+      
+      const containsAll = dbParticipants.every(p => selected.includes(p));
+      setMeetingFormat(containsAll ? "regular" : "free");
     }
   }, [selectedProtocolId, protocol, dbParticipants]);
+
+  const handleFormatChange = (format: "regular" | "free") => {
+    setMeetingFormat(format);
+    if (format === "regular") {
+      setSelectedParticipants(dbParticipants);
+      updateParticipantsString(dbParticipants, customParticipants);
+    } else {
+      setSelectedParticipants([]);
+      updateParticipantsString([], customParticipants);
+    }
+  };
 
   const updateParticipantsString = (selected: string[], custom: string) => {
     const customList = custom.split(",").map(s => s.trim()).filter(Boolean);
@@ -1944,7 +1958,7 @@ function ProtocolsView({
             decisions: 0,
             actionItems: 0,
             status: "draft" as const,
-            participants: ["Администратор"]
+            participants: meetingFormat === "regular" ? dbParticipants : []
           };
         }
         return item;
@@ -2440,196 +2454,359 @@ function ProtocolsView({
               </div>
 
               {/* Выбор типа протокола */}
-              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "8px" }}>
                 <span style={{ fontSize: "13px", fontWeight: 700, color: "var(--text)" }}>Тип протокола</span>
-                <div style={{ display: "flex", gap: "16px" }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                  <div 
+                    onClick={() => setProtocolType("meeting")}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "12px",
+                      padding: "16px",
+                      borderRadius: "12px",
+                      border: protocolType === "meeting" ? "1.5px solid #10b981" : "1.5px solid var(--line)",
+                      background: protocolType === "meeting" ? "#f0fdf4" : "#ffffff",
+                      cursor: "pointer",
+                      transition: "all 0.2s ease"
+                    }}
+                  >
                     <input
                       type="radio"
-                      name="protocolType"
                       checked={protocolType === "meeting"}
                       onChange={() => setProtocolType("meeting")}
-                      style={{ cursor: "pointer" }}
+                      style={{ width: "16px", height: "16px", cursor: "pointer", accentColor: "#10b981" }}
                     />
-                    <span>Оперативное совещание (Шаблон встречи)</span>
-                  </label>
-                  <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer" }}>
+                    <div>
+                      <strong style={{ display: "block", fontSize: "14px", color: "var(--text)" }}>Оперативное совещание</strong>
+                      <small style={{ fontSize: "12px", color: "var(--muted)" }}>Шаблон встречи</small>
+                    </div>
+                  </div>
+
+                  <div 
+                    onClick={() => setProtocolType("session")}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "12px",
+                      padding: "16px",
+                      borderRadius: "12px",
+                      border: protocolType === "session" ? "1.5px solid #10b981" : "1.5px solid var(--line)",
+                      background: protocolType === "session" ? "#f0fdf4" : "#ffffff",
+                      cursor: "pointer",
+                      transition: "all 0.2s ease"
+                    }}
+                  >
                     <input
                       type="radio"
-                      name="protocolType"
                       checked={protocolType === "session"}
                       onChange={() => setProtocolType("session")}
-                      style={{ cursor: "pointer" }}
+                      style={{ width: "16px", height: "16px", cursor: "pointer", accentColor: "#10b981" }}
                     />
-                    <span>Рабочая сессия (Шаблон сессии)</span>
-                  </label>
+                    <div>
+                      <strong style={{ display: "block", fontSize: "14px", color: "var(--text)" }}>Рабочая сессия</strong>
+                      <small style={{ fontSize: "12px", color: "var(--muted)" }}>Шаблон сессии</small>
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              {/* Участники встречи */}
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px", borderTop: "1px solid var(--line)", paddingTop: "12px" }}>
-                <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}>
-                  <input
-                    type="checkbox"
-                    checked={isRegular}
-                    onChange={(e) => {
-                      setIsRegular(e.target.checked);
-                      if (!e.target.checked) {
-                        setSelectedParticipants([]);
-                        updateParticipantsString([], customParticipants);
-                      }
+              {/* Выбор шаблона участников */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "12px" }}>
+                <span style={{ fontSize: "13px", fontWeight: 700, color: "var(--text)" }}>Шаблон состава участников</span>
+                <div style={{ display: "flex", gap: "12px" }}>
+                  <button
+                    type="button"
+                    onClick={() => handleFormatChange("regular")}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      padding: "8px 16px",
+                      borderRadius: "8px",
+                      border: meetingFormat === "regular" ? "1.5px solid #10b981" : "1.5px solid var(--line)",
+                      background: meetingFormat === "regular" ? "#f0fdf4" : "#ffffff",
+                      color: meetingFormat === "regular" ? "#16a34a" : "var(--text)",
+                      cursor: "pointer",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      transition: "all 0.2s"
                     }}
-                    style={{ width: "16px", height: "16px", cursor: "pointer" }}
-                  />
-                  <span>Регулярный протокол (постоянные участники)</span>
-                </label>
+                  >
+                    <span style={{
+                      width: "8px",
+                      height: "8px",
+                      borderRadius: "50%",
+                      background: meetingFormat === "regular" ? "#10b981" : "transparent",
+                      border: meetingFormat === "regular" ? "none" : "1.5px solid var(--muted)",
+                      display: "inline-block"
+                    }} />
+                    Регулярные встречи
+                  </button>
 
-                {isRegular && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px", padding: "12px", background: "var(--panel-strong)", border: "1px solid var(--line)", borderRadius: "var(--border-radius)", margin: "4px 0" }}>
-                    <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--muted)" }}>Выберите постоянных участников:</span>
-                    <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
-                      {dbParticipants.map((p) => {
-                        const isChecked = selectedParticipants.includes(p);
+                  <button
+                    type="button"
+                    onClick={() => handleFormatChange("free")}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      padding: "8px 16px",
+                      borderRadius: "8px",
+                      border: meetingFormat === "free" ? "1.5px solid #10b981" : "1.5px solid var(--line)",
+                      background: meetingFormat === "free" ? "#f0fdf4" : "#ffffff",
+                      color: meetingFormat === "free" ? "#16a34a" : "var(--text)",
+                      cursor: "pointer",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      transition: "all 0.2s"
+                    }}
+                  >
+                    <span style={{
+                      width: "8px",
+                      height: "8px",
+                      borderRadius: "50%",
+                      background: meetingFormat === "free" ? "#10b981" : "transparent",
+                      border: meetingFormat === "free" ? "none" : "1.5px solid var(--muted)",
+                      display: "inline-block"
+                    }} />
+                    Свободный формат
+                  </button>
+                </div>
+              </div>
+
+              {/* Двухколоночный макет для участников и загрузки */}
+              <div style={{ display: "grid", gridTemplateColumns: "1.2fr 0.8fr", gap: "24px", marginBottom: "8px" }}>
+                {/* Левая ... */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    <span style={{ fontSize: "13px", fontWeight: 700, color: "var(--text)" }}>Выберите участников:</span>
+                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                      {selectedParticipants.map((p) => {
                         return (
-                          <label key={p} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer" }}>
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={(e) => {
-                                let next;
-                                if (e.target.checked) {
-                                  next = [...selectedParticipants, p];
-                                } else {
-                                  next = selectedParticipants.filter(item => item !== p);
-                                }
+                          <span 
+                            key={p} 
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "6px",
+                              padding: "6px 12px",
+                              background: "#f1f5f9",
+                              border: "1px solid #cbd5e1",
+                              borderRadius: "99px",
+                              fontSize: "13px",
+                              fontWeight: 600,
+                              color: "#334155"
+                            }}
+                          >
+                            {p}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const next = selectedParticipants.filter(item => item !== p);
                                 setSelectedParticipants(next);
                                 updateParticipantsString(next, customParticipants);
                               }}
-                              style={{ width: "14px", height: "14px" }}
-                            />
-                            {p}
-                          </label>
+                              style={{ background: "transparent", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", color: "#64748b", fontSize: "14px", fontWeight: "bold" }}
+                            >
+                              ×
+                            </button>
+                          </span>
                         );
                       })}
+                      
+                      {/* Выпадающий список добавления */}
+                      <div style={{ position: "relative" }}>
+                        <button
+                          type="button"
+                          onClick={() => setIsAddParticipantOpen(!isAddParticipantOpen)}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            width: "32px",
+                            height: "32px",
+                            borderRadius: "50%",
+                            border: "1px dashed #cbd5e1",
+                            background: "#ffffff",
+                            cursor: "pointer",
+                            color: "#64748b",
+                            fontSize: "16px",
+                            fontWeight: "bold"
+                          }}
+                        >
+                          +
+                        </button>
+                        {isAddParticipantOpen && (
+                          <div style={{
+                            position: "absolute",
+                            top: "36px",
+                            left: 0,
+                            background: "#ffffff",
+                            border: "1px solid var(--line)",
+                            borderRadius: "8px",
+                            boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+                            zIndex: 10,
+                            minWidth: "180px",
+                            display: "flex",
+                            flexDirection: "column",
+                            padding: "6px"
+                          }}>
+                            {dbParticipants.map(p => {
+                              const isChecked = selectedParticipants.includes(p);
+                              return (
+                                <button
+                                  key={p}
+                                  type="button"
+                                  disabled={isChecked}
+                                  onClick={() => {
+                                    const next = [...selectedParticipants, p];
+                                    setSelectedParticipants(next);
+                                    updateParticipantsString(next, customParticipants);
+                                    setIsAddParticipantOpen(false);
+                                  }}
+                                  style={{
+                                    padding: "8px 12px",
+                                    textAlign: "left",
+                                    background: "transparent",
+                                    border: "none",
+                                    cursor: isChecked ? "default" : "pointer",
+                                    fontSize: "13px",
+                                    color: isChecked ? "var(--muted)" : "var(--text)",
+                                    borderRadius: "6px",
+                                    transition: "background 0.2s"
+                                  }}
+                                  onMouseEnter={(e) => { if(!isChecked) e.currentTarget.style.background = "#f1f5f9"; }}
+                                  onMouseLeave={(e) => { if(!isChecked) e.currentTarget.style.background = "transparent"; }}
+                                >
+                                  {p} {isChecked && "✓"}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
-                )}
 
-                <label style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "13px", fontWeight: 700, color: "var(--text)" }}>
-                  Участники встречи (через запятую)
-                  <input
-                    value={customParticipants}
-                    onChange={(e) => {
-                      setCustomParticipants(e.target.value);
-                      updateParticipantsString(selectedParticipants, e.target.value);
+                  <label style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "13px", fontWeight: 700, color: "var(--text)" }}>
+                    Участники встречи (через запятую)
+                    <input
+                      value={customParticipants}
+                      onChange={(e) => {
+                        setCustomParticipants(e.target.value);
+                        updateParticipantsString(selectedParticipants, e.target.value);
+                      }}
+                      placeholder="Введите ФИО участников"
+                      style={{ padding: "10px", border: "1px solid var(--line)", borderRadius: "var(--border-radius)", background: "#ffffff", color: "var(--text)", fontSize: "13px" }}
+                    />
+                    <small style={{ fontSize: "11px", color: "var(--muted)", marginTop: "2px" }}>Например: Иванов И.И., Петров П.П.</small>
+                  </label>
+                </div>
+
+                {/* Правая колонка: компактный блок загрузки файла */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                  <span style={{ fontSize: "13px", fontWeight: 700, color: "var(--text)" }}>Загрузка записи встречи</span>
+                  <div 
+                    style={{ 
+                      border: "1.5px dashed var(--line)", 
+                      borderRadius: "12px",
+                      padding: "20px 12px",
+                      textAlign: "center",
+                      background: "#f8fafc",
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "6px",
+                      cursor: "pointer",
+                      height: "100%",
+                      minHeight: "120px",
+                      position: "relative"
                     }}
-                    placeholder="Введите имена участников встречи"
-                    style={{ padding: "10px", border: "1px solid var(--line)", borderRadius: "var(--border-radius)", background: "var(--bg-card)", color: "var(--text)", fontSize: "13px" }}
-                  />
-                </label>
-              </div>
-
-              {/* Зона загрузки медиафайлов */}
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                <span style={{ fontSize: "14px", fontWeight: 700, color: "var(--text)" }}>
-                  Загрузка записи встречи
-                </span>
-
-                <div 
-                  style={{ 
-                    border: "2px dashed var(--line)", 
-                    borderRadius: "var(--border-radius)",
-                    padding: "32px 16px",
-                    textAlign: "center",
-                    background: "var(--bg)",
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    gap: "8px",
-                    cursor: "pointer",
-                    position: "relative"
-                  }}
-                  onClick={() => document.getElementById("audio-video-upload")?.click()}
-                >
-                  <Download size={36} style={{ color: "var(--muted)", marginBottom: "4px" }} />
-                  <span style={{ fontSize: "14px", fontWeight: 600 }}>
-                    {selectedFile ? selectedFile.name : "Выберите аудио или видео файл"}
-                  </span>
-                  <span style={{ fontSize: "12px", color: "var(--muted)" }}>
-                    {selectedFile 
-                      ? `${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB · Нажмите, чтобы заменить` 
-                      : "Поддерживаются MP4, AVI, MKV, MP3, WAV, M4A и др."
-                    }
-                  </span>
-                  
-                  {selectedFile && (
-                    <span style={{ fontSize: "13px", color: "var(--green)", fontWeight: 600, marginTop: "4px" }}>
-                      {mediaDuration 
-                        ? `Длительность: ${Math.floor(mediaDuration / 60)} мин ${Math.round(mediaDuration % 60)} сек`
-                        : "Определение длительности файла..."
+                    onClick={() => document.getElementById("audio-video-upload")?.click()}
+                  >
+                    <Download size={28} style={{ color: "#10b981", marginBottom: "2px" }} />
+                    <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--text)" }}>
+                      {selectedFile ? selectedFile.name : <>Перетащите файл сюда или <span style={{ color: "#10b981", textDecoration: "underline" }}>выберите</span></>}
+                    </span>
+                    <span style={{ fontSize: "11px", color: "var(--muted)" }}>
+                      {selectedFile 
+                        ? `${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB · Нажмите, чтобы заменить` 
+                        : "Поддерживаемые форматы: MP4, AVI, MKV, MP3, WAV, M4A и др."
                       }
                     </span>
-                  )}
-                  
-                  <input 
-                    id="audio-video-upload" 
-                    type="file" 
-                    accept="audio/*,video/*" 
-                    style={{ display: "none" }} 
-                    onChange={(e) => {
-                      if (e.target.files?.[0]) {
-                        handleFileSelect(e.target.files[0]);
-                      }
-                    }}
-                  />
+                    
+                    {selectedFile && mediaDuration && (
+                      <span style={{ fontSize: "12px", color: "var(--green)", fontWeight: 600 }}>
+                        {`Длительность: ${Math.floor(mediaDuration / 60)} мин ${Math.round(mediaDuration % 60)} сек`}
+                      </span>
+                    )}
+                    
+                    <input 
+                      id="audio-video-upload" 
+                      type="file" 
+                      accept="audio/*,video/*" 
+                      style={{ display: "none" }} 
+                      onChange={(e) => {
+                        if (e.target.files?.[0]) {
+                          handleFileSelect(e.target.files[0]);
+                        }
+                      }}
+                    />
+                  </div>
                 </div>
+              </div>
 
-                {/* Кнопки управления */}
-                <div style={{ display: "flex", gap: "12px", marginTop: "8px" }}>
-                  <button
-                    type="button"
-                    className="primary-button"
-                    disabled={isGenerating || (!selectedFile && !(protocol?.transcript && protocol.transcript.trim()))}
-                    onClick={handleRegenerate}
-                    style={{ 
-                      flex: 1,
-                      height: "44px", 
-                      fontSize: "14px", 
-                      fontWeight: 600,
-                      display: "flex", 
-                      alignItems: "center", 
-                      justifyContent: "center", 
-                      gap: "8px",
-                      borderRadius: "var(--border-radius)",
-                      cursor: (isGenerating || (!selectedFile && !(protocol?.transcript && protocol.transcript.trim()))) ? "not-allowed" : "pointer",
-                      opacity: (isGenerating || (!selectedFile && !(protocol?.transcript && protocol.transcript.trim()))) ? 0.5 : 1
-                    }}
-                  >
-                    <Play size={16} />
-                    Запустить
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={handleReset}
-                    style={{ 
-                      height: "44px", 
-                      padding: "0 24px",
-                      fontSize: "14px", 
-                      fontWeight: 600,
-                      display: "flex", 
-                      alignItems: "center", 
-                      justifyContent: "center", 
-                      gap: "8px",
-                      borderRadius: "var(--border-radius)",
-                      border: "1px solid var(--line)",
-                      background: "#ffffff",
-                      cursor: "pointer"
-                    }}
-                  >
-                    Сбросить
-                  </button>
-                </div>
+              {/* Кнопки управления */}
+              <div style={{ display: "flex", gap: "16px", marginTop: "12px", borderTop: "1px solid var(--line)", paddingTop: "16px" }}>
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={isGenerating || (!selectedFile && !(protocol?.transcript && protocol.transcript.trim()))}
+                  onClick={handleRegenerate}
+                  style={{ 
+                    flex: 1,
+                    height: "46px", 
+                    fontSize: "14px", 
+                    fontWeight: 600,
+                    display: "flex", 
+                    alignItems: "center", 
+                    justifyContent: "center", 
+                    gap: "8px",
+                    borderRadius: "8px",
+                    background: "#10b981",
+                    borderColor: "#10b981",
+                    color: "#ffffff",
+                    cursor: (isGenerating || (!selectedFile && !(protocol?.transcript && protocol.transcript.trim()))) ? "not-allowed" : "pointer",
+                    opacity: (isGenerating || (!selectedFile && !(protocol?.transcript && protocol.transcript.trim()))) ? 0.5 : 1
+                  }}
+                >
+                  <Play size={16} />
+                  Запустить
+                </button>
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  style={{ 
+                    height: "46px", 
+                    padding: "0 28px",
+                    fontSize: "14px", 
+                    fontWeight: 600,
+                    display: "flex", 
+                    alignItems: "center", 
+                    justifyContent: "center", 
+                    gap: "8px",
+                    borderRadius: "8px",
+                    border: "1.5px solid var(--line)",
+                    background: "#ffffff",
+                    color: "var(--text)",
+                    cursor: "pointer"
+                  }}
+                >
+                  Сбросить
+                </button>
+              </div>
                 
                 {isGenerating && progressMessage && (
                   <div style={{ 
@@ -2650,7 +2827,6 @@ function ProtocolsView({
                     )}
                   </div>
                 )}
-              </div>
 
               {/* Вкладки превью результатов (перенесены ВЫШЕ хода выполнения) */}
               {(protocol.transcript || isGenerating) && (

@@ -1823,7 +1823,13 @@ function ProtocolsView({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [progressMessage, setProgressMessage] = useState("");
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
-  const [previewTab, setPreviewTab] = useState<"protocol" | "transcript">("protocol");
+  const [previewTab, setPreviewTab] = useState<"protocol" | "transcript">("transcript");
+  const [protocolType, setProtocolType] = useState<"meeting" | "session">("meeting");
+  const [isRegular, setIsRegular] = useState(false);
+  const [selectedParticipants, setSelectedParticipants] = useState<string[]>([]);
+  const [customParticipants, setCustomParticipants] = useState("");
+
+  const dbParticipants = useMemo(() => ["Антон Актуганов", "Андрей Лебедев", "Колесникова Софья"], []);
 
   const [chunksCount, setChunksCount] = useState<number | null>(null);
   const [mediaDuration, setMediaDuration] = useState<number | null>(null);
@@ -1893,6 +1899,99 @@ function ProtocolsView({
   };
 
   const protocol = protocols.find((item) => item.id === selectedProtocolId);
+
+  useEffect(() => {
+    if (protocol) {
+      const parts = protocol.participants || [];
+      const selected = parts.filter(p => dbParticipants.includes(p));
+      const custom = parts.filter(p => !dbParticipants.includes(p)).join(", ");
+      setSelectedParticipants(selected);
+      setCustomParticipants(custom);
+      setIsRegular(selected.length > 0);
+    }
+  }, [selectedProtocolId, protocol, dbParticipants]);
+
+  const updateParticipantsString = (selected: string[], custom: string) => {
+    const customList = custom.split(",").map(s => s.trim()).filter(Boolean);
+    const allParticipants = Array.from(new Set([...selected, ...customList]));
+    handleFieldChange("participants", allParticipants.join(", "));
+  };
+
+  const handleReset = () => {
+    setSelectedFile(null);
+    setChunksCount(null);
+    setMediaDuration(null);
+    setError(null);
+    setProgressMessage("");
+    setUploadProgress(null);
+    setHasRunStarted(false);
+    
+    if (protocol) {
+      const updated = protocols.map((item) => {
+        if (item.id === selectedProtocolId) {
+          return {
+            ...item,
+            transcript: "",
+            theme: "",
+            agenda: "",
+            keyPoints: "",
+            decisionsText: "",
+            tasksText: "",
+            responsible: "",
+            deadlines: "",
+            risks: "",
+            attachments: "",
+            decisions: 0,
+            actionItems: 0,
+            status: "draft" as const,
+            participants: ["Администратор"]
+          };
+        }
+        return item;
+      });
+      setProtocols(updated);
+      void saveProtocols(updated);
+    }
+  };
+
+  const parseFileNameMetadata = (fileName: string) => {
+    const dotDmyRegex = /(\d{2})\.(\d{2})\.(\d{4})/;
+    const dashDmyRegex = /(\d{2})-(\d{2})-(\d{4})/;
+    const ymdRegex = /(\d{4})-(\d{2})-(\d{2})/;
+    
+    let dateStr = "";
+    let displayDateStr = "";
+    
+    let match = fileName.match(dotDmyRegex);
+    if (match) {
+      dateStr = `${match[3]}-${match[2]}-${match[1]}`;
+      displayDateStr = `${match[1]}.${match[2]}.${match[3]}`;
+    } else {
+      match = fileName.match(dashDmyRegex);
+      if (match) {
+        dateStr = `${match[3]}-${match[2]}-${match[1]}`;
+        displayDateStr = `${match[1]}.${match[2]}.${match[3]}`;
+      } else {
+        match = fileName.match(ymdRegex);
+        if (match) {
+          dateStr = match[0];
+          displayDateStr = `${match[3]}.${match[2]}.${match[1]}`;
+        }
+      }
+    }
+    
+    if (!dateStr) {
+      const today = new Date();
+      const dd = String(today.getDate()).padStart(2, '0');
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const yyyy = today.getFullYear();
+      dateStr = `${yyyy}-${mm}-${dd}`;
+      displayDateStr = `${dd}.${mm}.${yyyy}`;
+    }
+    
+    const autoTitle = `Протокол встречи от ${displayDateStr}`;
+    return { dateStr, autoTitle };
+  };
 
   // Sync run steps from existing protocol data or selected file
   useEffect(() => {
@@ -1967,6 +2066,22 @@ function ProtocolsView({
     setSelectedFile(file);
     setChunksCount(null);
     setMediaDuration(null);
+
+    const { dateStr, autoTitle } = parseFileNameMetadata(file.name);
+    if (protocol) {
+      const updated = protocols.map((item) => {
+        if (item.id === selectedProtocolId) {
+          return {
+            ...item,
+            date: dateStr,
+            title: autoTitle
+          };
+        }
+        return item;
+      });
+      setProtocols(updated);
+      void saveProtocols(updated);
+    }
 
     const objectUrl = URL.createObjectURL(file);
     const isVideo = file.type.startsWith("video");
@@ -2056,7 +2171,9 @@ function ProtocolsView({
     });
 
     try {
-      const promptText = promptSettings["protocol.meeting"] || "";
+      const promptText = protocolType === "meeting"
+        ? (promptSettings["protocol.meeting"] || "")
+        : (promptSettings["protocol.session"] || "");
       const transcriptPromptText = promptSettings["protocol.transcript"] || "";
       
       let response;
@@ -2302,20 +2419,112 @@ function ProtocolsView({
 
             <div className="protocol-editor" style={{ display: "flex", flexDirection: "column", gap: "16px", overflowY: "auto", paddingRight: "4px" }}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-                <label>
+                <label style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "13px", fontWeight: 700, color: "var(--text)" }}>
                   Название встречи
                   <input
                     value={protocol.title || ""}
                     onChange={(e) => handleFieldChange("title", e.target.value)}
                     placeholder="Заполнить название"
+                    style={{ padding: "10px", border: "1px solid var(--line)", borderRadius: "var(--border-radius)", background: "var(--bg-card)", color: "var(--text)" }}
                   />
                 </label>
-                <label>
+                <label style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "13px", fontWeight: 700, color: "var(--text)" }}>
                   Дата встречи
                   <input
                     type="date"
                     value={protocol.date || ""}
                     onChange={(e) => handleFieldChange("date", e.target.value)}
+                    style={{ padding: "10px", border: "1px solid var(--line)", borderRadius: "var(--border-radius)", background: "var(--bg-card)", color: "var(--text)" }}
+                  />
+                </label>
+              </div>
+
+              {/* Выбор типа протокола */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <span style={{ fontSize: "13px", fontWeight: 700, color: "var(--text)" }}>Тип протокола</span>
+                <div style={{ display: "flex", gap: "16px" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer" }}>
+                    <input
+                      type="radio"
+                      name="protocolType"
+                      checked={protocolType === "meeting"}
+                      onChange={() => setProtocolType("meeting")}
+                      style={{ cursor: "pointer" }}
+                    />
+                    <span>Оперативное совещание (Шаблон встречи)</span>
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer" }}>
+                    <input
+                      type="radio"
+                      name="protocolType"
+                      checked={protocolType === "session"}
+                      onChange={() => setProtocolType("session")}
+                      style={{ cursor: "pointer" }}
+                    />
+                    <span>Рабочая сессия (Шаблон сессии)</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Участники встречи */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px", borderTop: "1px solid var(--line)", paddingTop: "12px" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={isRegular}
+                    onChange={(e) => {
+                      setIsRegular(e.target.checked);
+                      if (!e.target.checked) {
+                        setSelectedParticipants([]);
+                        updateParticipantsString([], customParticipants);
+                      }
+                    }}
+                    style={{ width: "16px", height: "16px", cursor: "pointer" }}
+                  />
+                  <span>Регулярный протокол (постоянные участники)</span>
+                </label>
+
+                {isRegular && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px", padding: "12px", background: "var(--panel-strong)", border: "1px solid var(--line)", borderRadius: "var(--border-radius)", margin: "4px 0" }}>
+                    <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--muted)" }}>Выберите постоянных участников:</span>
+                    <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
+                      {dbParticipants.map((p) => {
+                        const isChecked = selectedParticipants.includes(p);
+                        return (
+                          <label key={p} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer" }}>
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                let next;
+                                if (e.target.checked) {
+                                  next = [...selectedParticipants, p];
+                                } else {
+                                  next = selectedParticipants.filter(item => item !== p);
+                                }
+                                setSelectedParticipants(next);
+                                updateParticipantsString(next, customParticipants);
+                              }}
+                              style={{ width: "14px", height: "14px" }}
+                            />
+                            {p}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <label style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "13px", fontWeight: 700, color: "var(--text)" }}>
+                  Участники встречи (через запятую)
+                  <input
+                    value={customParticipants}
+                    onChange={(e) => {
+                      setCustomParticipants(e.target.value);
+                      updateParticipantsString(selectedParticipants, e.target.value);
+                    }}
+                    placeholder="Введите имена участников встречи"
+                    style={{ padding: "10px", border: "1px solid var(--line)", borderRadius: "var(--border-radius)", background: "var(--bg-card)", color: "var(--text)", fontSize: "13px" }}
                   />
                 </label>
               </div>
@@ -2375,29 +2584,52 @@ function ProtocolsView({
                   />
                 </div>
 
-                {/* Кнопка "Запустить" */}
-                <button
-                  type="button"
-                  className="primary-button"
-                  disabled={isGenerating || (!selectedFile && !(protocol?.transcript && protocol.transcript.trim()))}
-                  onClick={handleRegenerate}
-                  style={{ 
-                    marginTop: "8px",
-                    height: "44px", 
-                    fontSize: "14px", 
-                    fontWeight: 600,
-                    display: "flex", 
-                    alignItems: "center", 
-                    justifyContent: "center", 
-                    gap: "8px",
-                    borderRadius: "var(--border-radius)",
-                    cursor: (isGenerating || (!selectedFile && !(protocol?.transcript && protocol.transcript.trim()))) ? "not-allowed" : "pointer",
-                    opacity: (isGenerating || (!selectedFile && !(protocol?.transcript && protocol.transcript.trim()))) ? 0.5 : 1
-                  }}
-                >
-                  <Play size={16} />
-                  Запустить
-                </button>
+                {/* Кнопки управления */}
+                <div style={{ display: "flex", gap: "12px", marginTop: "8px" }}>
+                  <button
+                    type="button"
+                    className="primary-button"
+                    disabled={isGenerating || (!selectedFile && !(protocol?.transcript && protocol.transcript.trim()))}
+                    onClick={handleRegenerate}
+                    style={{ 
+                      flex: 1,
+                      height: "44px", 
+                      fontSize: "14px", 
+                      fontWeight: 600,
+                      display: "flex", 
+                      alignItems: "center", 
+                      justifyContent: "center", 
+                      gap: "8px",
+                      borderRadius: "var(--border-radius)",
+                      cursor: (isGenerating || (!selectedFile && !(protocol?.transcript && protocol.transcript.trim()))) ? "not-allowed" : "pointer",
+                      opacity: (isGenerating || (!selectedFile && !(protocol?.transcript && protocol.transcript.trim()))) ? 0.5 : 1
+                    }}
+                  >
+                    <Play size={16} />
+                    Запустить
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={handleReset}
+                    style={{ 
+                      height: "44px", 
+                      padding: "0 24px",
+                      fontSize: "14px", 
+                      fontWeight: 600,
+                      display: "flex", 
+                      alignItems: "center", 
+                      justifyContent: "center", 
+                      gap: "8px",
+                      borderRadius: "var(--border-radius)",
+                      border: "1px solid var(--line)",
+                      background: "#ffffff",
+                      cursor: "pointer"
+                    }}
+                  >
+                    Сбросить
+                  </button>
+                </div>
                 
                 {isGenerating && progressMessage && (
                   <div style={{ 
@@ -2426,6 +2658,22 @@ function ProtocolsView({
                   <div style={{ display: "flex", borderBottom: "1px solid var(--line)", paddingBottom: "2px", gap: "16px" }}>
                     <button
                       type="button"
+                      style={{
+                        padding: "8px 4px",
+                        background: "transparent",
+                        border: "none",
+                        borderBottom: previewTab === "transcript" ? "2px solid var(--green)" : "none",
+                        color: previewTab === "transcript" ? "var(--text)" : "var(--muted)",
+                        fontWeight: previewTab === "transcript" ? 700 : 500,
+                        cursor: "pointer",
+                        fontSize: "14px"
+                      }}
+                      onClick={() => setPreviewTab("transcript")}
+                    >
+                      Превью стенограммы {isGenerating && " (распознавание...)"}
+                    </button>
+                    <button
+                      type="button"
                       disabled={isGenerating && previewTab === "protocol"}
                       style={{
                         padding: "8px 4px",
@@ -2442,22 +2690,6 @@ function ProtocolsView({
                     >
                       Превью протокола
                     </button>
-                    <button
-                      type="button"
-                      style={{
-                        padding: "8px 4px",
-                        background: "transparent",
-                        border: "none",
-                        borderBottom: previewTab === "transcript" ? "2px solid var(--green)" : "none",
-                        color: previewTab === "transcript" ? "var(--text)" : "var(--muted)",
-                        fontWeight: previewTab === "transcript" ? 700 : 500,
-                        cursor: "pointer",
-                        fontSize: "14px"
-                      }}
-                      onClick={() => setPreviewTab("transcript")}
-                    >
-                      Превью стенограммы {isGenerating && " (распознавание...)"}
-                    </button>
                   </div>
 
                   {previewTab === "protocol" && !isGenerating ? (
@@ -2471,7 +2703,7 @@ function ProtocolsView({
                       gap: "16px", 
                       fontSize: "14px", 
                       lineHeight: "1.6",
-                      maxHeight: "450px",
+                      maxHeight: "750px",
                       overflowY: "auto"
                     }}>
                       <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
@@ -2659,8 +2891,8 @@ function ProtocolsView({
                         border: "1px solid var(--line)",
                         fontSize: "13px",
                         lineHeight: "1.6",
-                        minHeight: "300px",
-                        maxHeight: "450px",
+                        minHeight: "500px",
+                        maxHeight: "750px",
                         width: "100%",
                         color: "var(--text)",
                         fontFamily: "monospace",
@@ -2987,6 +3219,17 @@ export default function Home() {
     }
   }, []);
 
+  useEffect(() => {
+    const savedWorkspace = localStorage.getItem("selected_workspace") as "analytics" | "protocols" | null;
+    const savedSection = localStorage.getItem("selected_section") as Section | null;
+    if (savedWorkspace) {
+      setWorkspace(savedWorkspace);
+    }
+    if (savedSection) {
+      setSection(savedSection);
+    }
+  }, []);
+
   const handleLoginSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (loginUser === "admin" && loginPass === "a12345") {
@@ -3034,9 +3277,13 @@ export default function Home() {
     if (workspace === "analytics") {
       setWorkspace("protocols");
       setSection("protocols");
+      localStorage.setItem("selected_workspace", "protocols");
+      localStorage.setItem("selected_section", "protocols");
     } else {
       setWorkspace("analytics");
       setSection("analytics");
+      localStorage.setItem("selected_workspace", "analytics");
+      localStorage.setItem("selected_section", "analytics");
     }
   };
 
@@ -3100,22 +3347,22 @@ export default function Home() {
         <nav>
           {workspace === "analytics" ? (
             <>
-              <button className={cx(section === "analytics" && "active")} onClick={() => setSection("analytics")} title="Конструктор сценария">
+              <button className={cx(section === "analytics" && "active")} onClick={() => { setSection("analytics"); localStorage.setItem("selected_section", "analytics"); }} title="Конструктор сценария">
                 <LayoutDashboard size={18} />
                 <span>Конструктор сценария</span>
               </button>
-              <button className={cx(section === "prompts" && "active")} onClick={() => setSection("prompts")} title="Настройки промптов">
+              <button className={cx(section === "prompts" && "active")} onClick={() => { setSection("prompts"); localStorage.setItem("selected_section", "prompts"); }} title="Настройки промптов">
                 <Sparkles size={18} />
                 <span>Настройки промптов</span>
               </button>
             </>
           ) : (
             <>
-              <button className={cx(section === "protocols" && "active")} onClick={() => setSection("protocols")} title="Протоколы">
+              <button className={cx(section === "protocols" && "active")} onClick={() => { setSection("protocols"); localStorage.setItem("selected_section", "protocols"); }} title="Протоколы">
                 <ClipboardList size={18} />
                 <span>Протоколы</span>
               </button>
-              <button className={cx(section === "prompts" && "active")} onClick={() => setSection("prompts")} title="Настройки промптов">
+              <button className={cx(section === "prompts" && "active")} onClick={() => { setSection("prompts"); localStorage.setItem("selected_section", "prompts"); }} title="Настройки промптов">
                 <Sparkles size={18} />
                 <span>Настройки промптов</span>
               </button>

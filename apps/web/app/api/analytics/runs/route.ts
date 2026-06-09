@@ -242,7 +242,7 @@ export async function POST(request: Request) {
     let llmStatus: "succeeded" | "skipped" = "skipped";
     const blocks = payload.selectedBlocks ?? [];
 
-    if (totalAnswers > 0 || blocks.includes("infographic-prompt") || blocks.includes("infographic-image")) {
+    if (totalAnswers > 0 || blocks.includes("infographic") || blocks.includes("infographic-prompt") || blocks.includes("infographic-image")) {
       const llm = new LlmClient();
 
       // --- STEP 1: DAY 1 ANALYTICS ---
@@ -371,14 +371,25 @@ export async function POST(request: Request) {
         }
 
         try {
+          const basePrompt = payload.stagePrompts?.infographicImage || payload.stagePrompts?.["infographic-image"] || "";
+          const finalPrompt = basePrompt 
+            ? `${basePrompt}\n\nСгенерированная разметка:\n${visualPrompt}`
+            : visualPrompt;
+
+          const logos = payload.assetFiles?.logo?.slice(0, 2).map(f => f.base64) || [];
+          const photos = payload.assetFiles?.generalPhoto?.slice(0, 2).map(f => f.base64) || [];
+
           infographicImageUrl = await new ImageGenerationClient().generateImage({
-            prompt: visualPrompt,
-            model: "gpt-image-2"
+            prompt: finalPrompt,
+            model: "gpt-5.5",
+            logo: logos.length > 1 ? logos : (logos[0] || undefined),
+            photo: photos.length > 1 ? photos : (photos[0] || undefined)
           });
           stageReports["infographic-image"] = `Изображение инфографики успешно сгенерировано.`;
         } catch (imgError) {
-          console.error("Failed to generate image with model gpt-image-2:", imgError);
+          console.error("Failed to generate image with model gpt-5.5:", imgError);
           stageReports["infographic-image"] = `Ошибка генерации изображения.`;
+          throw imgError;
         }
       }
 
@@ -398,15 +409,26 @@ export async function POST(request: Request) {
             maxTokens: 4096
           });
 
+          const basePrompt = payload.stagePrompts?.infographicImage || "";
+          const finalPrompt = basePrompt 
+            ? `${basePrompt}\n\nСгенерированная разметка:\n${visualPrompt}`
+            : visualPrompt;
+
+          const logos = payload.assetFiles?.logo?.slice(0, 2).map(f => f.base64) || [];
+          const photos = payload.assetFiles?.generalPhoto?.slice(0, 2).map(f => f.base64) || [];
+
           infographicImageUrl = await new ImageGenerationClient().generateImage({
-            prompt: visualPrompt,
-            model: "gpt-image-2"
+            prompt: finalPrompt,
+            model: "gpt-5.5",
+            logo: logos.length > 1 ? logos : (logos[0] || undefined),
+            photo: photos.length > 1 ? photos : (photos[0] || undefined)
           });
           
-          stageReports.infographic = `# Инфографика\n\nСгенерирован визуальный промпт:\n${visualPrompt}`;
+          stageReports.infographic = `# Инфографика\n\nМакет инфографики:\n${visualPrompt}`;
         } catch (imgError) {
           console.error("Failed to generate image:", imgError);
           stageReports.infographic = `# Инфографика\n\nОшибка генерации изображения.`;
+          throw imgError;
         }
       }
 

@@ -7,6 +7,8 @@ export interface ImageGenerationOptions {
   prompt: string;
   size?: string;
   quality?: string;
+  logo?: string | string[];
+  photo?: string | string[];
 }
 
 export class ImageGenerationClient {
@@ -26,7 +28,10 @@ export class ImageGenerationClient {
       prompt: options.prompt,
       n: 1,
       size: options.size ?? "1024x1024",
-      ...(options.quality ? { quality: options.quality } : {})
+      response_format: "b64_json",
+      ...(options.quality ? { quality: options.quality } : {}),
+      ...(options.logo ? { logo: options.logo } : {}),
+      ...(options.photo ? { photo: options.photo } : {})
     });
 
     return new Promise<string>((resolve, reject) => {
@@ -109,7 +114,11 @@ export class ImageGenerationClient {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 900000);
 
-    const isInternal = this.config.imageServiceUrl && this.config.imageServiceUrl.includes("automation-codex-service");
+    const isInternal = this.config.imageServiceUrl && (
+      this.config.imageServiceUrl.includes("automation-codex-service") ||
+      this.config.imageServiceUrl.includes("localhost") ||
+      this.config.imageServiceUrl.includes("127.0.0.1")
+    );
     const baseUrl = isInternal ? this.config.imageServiceUrl : "https://codex.sale/v1";
     const apiKey = isInternal ? "" : "sk-clb-3APylzCeyo_r4Lapmp_eLgQl5Ul973_z6QLyRWD1L1A";
     const modelName = options.model ?? (isInternal ? "gpt-5.5" : "gpt-image-2");

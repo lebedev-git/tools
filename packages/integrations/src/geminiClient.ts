@@ -39,9 +39,10 @@ export class GeminiClient {
       const is500 = error.message?.includes("status 500");
       const isTimeout = error.message?.includes("timed out");
       const isNetwork = error.name === "TypeError" || error.message?.includes("fetch failed");
+      const isAuthError = error.message?.includes("status 401") || error.message?.includes("status 403") || error.message?.includes("API key not valid");
 
-      if (retries > 0 && (is503 || is429 || is500 || isTimeout || isNetwork)) {
-        if (is429 || is503) {
+      if (retries > 0 && (is503 || is429 || is500 || isTimeout || isNetwork || isAuthError)) {
+        if (is429 || is503 || isAuthError) {
           this.rotateKey(keys);
         }
         console.warn(`Gemini API operation failed. Retrying in ${delay}ms... (${retries} attempts left). Error: ${error.message}`);
@@ -52,13 +53,146 @@ export class GeminiClient {
     }
   }
 
+  public async uploadFile(fileBuffer: Buffer, mimeType: string, displayName: string): Promise<{ name: string; uri: string }> {
+    return this.executeWithRetry(async (apiKey) => {
+      const initUrl = `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${apiKey}`;
+      const initResponse = await fetch(initUrl, {
+        method: "POST",
+        headers: {
+          "X-Goog-Upload-Protocol": "resumable",
+          "X-Goog-Upload-Command": "start",
+          "X-Goog-Upload-Header-Content-Length": String(fileBuffer.length),
+          "X-Goog-Upload-Header-Content-Type": mimeType,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          file: { display_name: displayName }
+        })
+      });
+
+      if (!initResponse.ok) {
+        const errText = await initResponse.text();
+        throw new Error(`Failed to initialize file upload: ${initResponse.status} ${errText}`);
+      }
+
+      const uploadUrl = initResponse.headers.get("x-goog-upload-url");
+      if (!uploadUrl) {
+        throw new Error("Failed to get upload URL from response headers.");
+      }
+
+      const uploadResponse = await fetch(uploadUrl, {
+        method: "POST",
+        headers: {
+          "Content-Length": String(fileBuffer.length),
+          "X-Goog-Upload-Offset": "0",
+          "X-Goog-Upload-Command": "upload, finalize"
+        },
+        body: new Uint8Array(fileBuffer)
+      });
+
+      if (!uploadResponse.ok) {
+        const errText = await uploadResponse.text();
+        throw new Error(`Failed to upload file content: ${uploadResponse.status} ${errText}`);
+      }
+
+      const data = await uploadResponse.json();
+      return {
+        name: data.file.name,
+        uri: data.file.uri
+      };
+    });
+  }
+
+  public async getFileState(fileName: string): Promise<{ state: string }> {
+    return this.executeWithRetry(async (apiKey) => {
+      const url = `https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${apiKey}`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Failed to get file status: ${response.status} ${errText}`);
+      }
+      const data = await response.json();
+      return {
+        state: data.state || "PROCESSING"
+      };
+    });
+  }
+
+  public async deleteFile(fileName: string): Promise<void> {
+    return this.executeWithRetry(async (apiKey) => {
+      const url = `https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${apiKey}`;
+      const response = await fetch(url, { method: "DELETE" });
+      if (!response.ok) {
+        console.warn(`Failed to delete file ${fileName} from Google Cloud: ${response.status}`);
+      }
+    });
+  }
+
+  public async transcribeAudioFromFileUri(fileUri: string, mimeType: string, prompt?: string): Promise<string> {
+    return this.executeWithRetry(async (apiKey) => {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+      const instructionText = prompt || "Сделай дословную и максимально точную транскрибацию этого аудиофайла на русском языке. Запиши только произнесенный текст встречи, не добавляй от себя никаких комментариев, резюме или вводных фраз.";
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minutes timeout for whole file
+
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  {
+                    fileData: {
+                      fileUri,
+                      mimeType
+                    }
+                  },
+                  {
+                    text: instructionText
+                  }
+                ]
+              }
+            ]
+          }),
+          signal: controller.signal
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Gemini transcription API returned status ${response.status}: ${errText}`);
+        }
+
+        const data = await response.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+        if (typeof text !== "string") {
+          throw new Error("Gemini returned an unexpected response structure for transcription.");
+        }
+
+        return text.trim();
+      } catch (error: any) {
+        if (error.name === "AbortError") {
+          throw new Error("Gemini transcription request timed out after 3 minutes.");
+        }
+        throw error;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    });
+  }
+
   public async transcribeAudio(base64Data: string, mimeType: string = "audio/mp3", prompt?: string): Promise<string> {
     return this.executeWithRetry(async (apiKey) => {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
       const instructionText = prompt || "Сделай дословную и максимально точную транскрибацию этого аудиофайла на русском языке. Запиши только произнесенный текст встречи, не добавляй от себя никаких комментариев, резюме или вводных фраз.";
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 90000); // 90 seconds timeout for large audio files
+      const timeoutId = setTimeout(() => controller.abort(), 90000); // 90 seconds timeout
 
       try {
         const response = await fetch(url, {

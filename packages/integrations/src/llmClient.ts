@@ -32,7 +32,7 @@ export class LlmClient {
     }
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000);
+    const timeoutId = setTimeout(() => controller.abort(), 120000);
 
     try {
       const response = await fetch(`${this.config.llmBaseUrl}${this.config.llmChatCompletionsPath}`, {
@@ -69,7 +69,7 @@ export class LlmClient {
       return cleaned.trim();
     } catch (error: any) {
       if (error.name === "AbortError") {
-        throw new Error("LLM request timed out after 60 seconds.");
+        throw new Error("LLM request timed out after 120 seconds.");
       }
       throw error;
     } finally {

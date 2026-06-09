@@ -167,7 +167,7 @@ export async function POST(request: Request) {
     return new Response(new Uint8Array(buffer), {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "Content-Disposition": `attachment; filename="${encodeURIComponent(safeFilename)}.docx"`
+        "Content-Disposition": `attachment; filename="protocol.docx"; filename*=UTF-8''${encodeURIComponent(safeFilename)}.docx`
       }
     });
   } catch (error) {

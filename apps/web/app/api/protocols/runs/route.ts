@@ -1,7 +1,7 @@
 import { GeminiClient, getRuntimeConfig } from "@tools/integrations";
 import type { ProcessRun } from "@tools/core";
 import type { ProtocolRecord } from "@tools/protocols";
-import { mkdir, writeFile, readFile, readdir, rm } from "node:fs/promises";
+import { mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 
@@ -21,6 +21,23 @@ function runFFmpeg(args: string[]): Promise<void> {
       }
     });
   });
+}
+
+function ensureString(val: unknown): string {
+  if (typeof val === "string") return val;
+  if (Array.isArray(val)) return val.map(item => ensureString(item)).join("\n");
+  if (val === null || val === undefined) return "";
+  if (typeof val === "object") {
+    const obj = val as Record<string, unknown>;
+    return Object.entries(obj)
+      .map(([k, v]) => {
+        const valStr = ensureString(v);
+        if (/^\d+$/.test(k)) return valStr;
+        return `${k}: ${valStr}`;
+      })
+      .join("\n");
+  }
+  return String(val);
 }
 
 function protocolsPath() {
@@ -69,11 +86,15 @@ export async function POST(request: Request) {
       };
 
       let tempDir = "";
+      let uploadResultName = "";
       try {
         const gemini = new GeminiClient();
         let finalTranscript = "";
 
         if (file) {
+          const originalMime = file.type || "application/octet-stream";
+          const isAudio = originalMime.startsWith("audio/");
+
           // --- STAGE 1: Uploading & Pre-processing ---
           sendUpdate({ status: "running", stage: "upload", progress: 5, message: "Сохранение файла на сервере..." });
           
@@ -85,74 +106,75 @@ export async function POST(request: Request) {
           const fileBuffer = Buffer.from(await file.arrayBuffer());
           await writeFile(tempInputPath, fileBuffer);
 
-          // --- STAGE 2: Conversion ---
-          sendUpdate({ status: "running", stage: "convert", progress: 15, message: "Конвертация в оптимизированный аудиоформат MP3..." });
-          const tempOutputPath = join(tempDir, "output.mp3");
+          let audioBuffer: Buffer;
+          let audioMimeType: string;
+          const outputMime = "audio/mp3";
 
-          // Conversion parameters: mono, 96 kbps, 22050 Hz
-          const convertArgs = [
-            "-i", tempInputPath,
-            "-vn",
-            "-acodec", "libmp3lame",
-            "-b:a", "96k",
-            "-ar", "22050",
-            "-ac", "1",
-            tempOutputPath,
-            "-y"
-          ];
-          await runFFmpeg(convertArgs);
+          if (isAudio && originalMime !== "audio/webm" && originalMime !== "audio/ogg") {
+            // If it is already a standard audio format, use it directly to bypass ffmpeg
+            sendUpdate({ status: "running", stage: "convert", progress: 15, message: "Файл уже является аудиоформатом. Оптимизация не требуется." });
+            audioBuffer = fileBuffer;
+            audioMimeType = originalMime;
+          } else {
+            // --- STAGE 2: Conversion ---
+            sendUpdate({ status: "running", stage: "convert", progress: 15, message: "Извлечение и оптимизация аудиодорожки через FFmpeg..." });
+            const tempOutputPath = join(tempDir, "output.mp3");
 
-          // --- STAGE 3: Splitting ---
-          sendUpdate({ status: "running", stage: "split", progress: 30, message: "Разбивка аудиозаписи на сегменты по 10 минут..." });
-          const splitArgs = [
-            "-i", tempOutputPath,
-            "-f", "segment",
-            "-segment_time", "600",
-            "-c", "copy",
-            join(tempDir, "chunk_%03d.mp3"),
-            "-y"
-          ];
-          await runFFmpeg(splitArgs);
+            // Extract audio with good quality: stereo, 128 kbps, 44100 Hz
+            const convertArgs = [
+              "-i", tempInputPath,
+              "-vn",
+              "-acodec", "libmp3lame",
+              "-b:a", "128k",
+              "-ar", "44100",
+              tempOutputPath,
+              "-y"
+            ];
+            await runFFmpeg(convertArgs);
 
-          // Read all chunk files
-          const filesInTemp = await readdir(tempDir);
-          const chunkFiles = filesInTemp
-            .filter((f) => f.startsWith("chunk_") && f.endsWith(".mp3"))
-            .sort();
-
-          if (chunkFiles.length === 0) {
-            throw new Error("Не удалось разделить аудиофайл на части.");
+            audioBuffer = await readFile(tempOutputPath);
+            audioMimeType = outputMime;
           }
 
-          // --- STAGE 4: Transcription of each chunk ---
-          const transcripts: string[] = [];
-          for (let i = 0; i < chunkFiles.length; i++) {
-            const chunkFile = chunkFiles[i];
-            const percent = 35 + Math.round((i / chunkFiles.length) * 45); // 35% to 80%
+          // --- STAGE 3: Google File API Upload ---
+          sendUpdate({ status: "running", stage: "google_upload", progress: 30, message: "Загрузка аудио в Google Cloud..." });
+          const cloudDisplayName = `proto_${protocolId}_${Date.now()}`;
+          const uploadResult = await gemini.uploadFile(audioBuffer, audioMimeType, cloudDisplayName);
+          uploadResultName = uploadResult.name;
+
+          // --- STAGE 4: Wait for file processing ---
+          let state = "PROCESSING";
+          let attempts = 0;
+          sendUpdate({ status: "running", stage: "google_upload", progress: 45, message: "Ожидание обработки аудиофайла в Google Cloud..." });
+
+          while (state === "PROCESSING" && attempts < 60) {
+            await new Promise((resolve) => setTimeout(resolve, 3000));
+            const fileInfo = await gemini.getFileState(uploadResult.name);
+            state = fileInfo.state;
+            attempts++;
             sendUpdate({
               status: "running",
-              stage: "transcribe",
-              progress: percent,
-              message: `Распознавание речи: часть ${i + 1} из ${chunkFiles.length}...`
-            });
-
-            const chunkPath = join(tempDir, chunkFile);
-            const chunkBuffer = await readFile(chunkPath);
-            const base64 = chunkBuffer.toString("base64");
-
-            const chunkTranscript = await gemini.transcribeAudio(base64, "audio/mp3", transcriptPrompt);
-            transcripts.push(chunkTranscript);
-
-            sendUpdate({
-              status: "running",
-              stage: "transcribe",
-              progress: percent,
-              message: `Часть ${i + 1} из ${chunkFiles.length} распознана успешно.`,
-              currentTranscript: transcripts.join("\n\n")
+              stage: "google_upload",
+              progress: Math.min(45 + attempts * 2, 75),
+              message: `Обработка аудиофайла в Google Cloud... (попытка ${attempts})`
             });
           }
 
-          finalTranscript = transcripts.join("\n\n");
+          if (state !== "ACTIVE") {
+            throw new Error(`Не удалось обработать аудиофайл в Google Cloud. Статус: ${state}`);
+          }
+
+          // --- STAGE 5: Transcription ---
+          sendUpdate({ status: "running", stage: "transcribe", progress: 80, message: "Распознавание речи по всей записи..." });
+          finalTranscript = await gemini.transcribeAudioFromFileUri(uploadResult.uri, audioMimeType, transcriptPrompt);
+
+          sendUpdate({
+            status: "running",
+            stage: "transcribe",
+            progress: 85,
+            message: "Стенограмма встречи успешно подготовлена.",
+            currentTranscript: finalTranscript
+          });
         } else {
           // No file uploaded, use text transcript
           if (!textTranscript || !textTranscript.trim()) {
@@ -161,26 +183,49 @@ export async function POST(request: Request) {
           finalTranscript = textTranscript;
         }
 
-        // --- STAGE 5: Protocol Generation via Gemini ---
+        // --- STAGE 6: Protocol Generation via Gemini ---
         sendUpdate({ 
           status: "running", 
           stage: "extract", 
-          progress: 85, 
+          progress: 90, 
           message: "Анализ стенограммы и создание протокола встречи...",
           currentTranscript: finalTranscript
         });
         
         const extractedData = await gemini.generateProtocol(finalTranscript, prompt);
 
-        // Calculate decisions and tasks count
-        const decisionsCount = extractedData.decisionsText
-          ? extractedData.decisionsText.split("\n").map((l: string) => l.trim()).filter((l: string) => l.startsWith("-") || l.startsWith("*") || /^\d+\./.test(l) || l.length > 0).length
+        // Normalize fields to string to prevent any issues with arrays/objects returned by AI
+        const theme = ensureString(extractedData?.theme);
+        const agenda = ensureString(extractedData?.agenda);
+        const keyPoints = ensureString(extractedData?.keyPoints);
+        const decisionsText = ensureString(extractedData?.decisionsText);
+        const tasksText = ensureString(extractedData?.tasksText);
+        const responsible = ensureString(extractedData?.responsible);
+        const deadlines = ensureString(extractedData?.deadlines);
+        const risks = ensureString(extractedData?.risks);
+        const attachments = ensureString(extractedData?.attachments);
+
+        const normalizedData = {
+          theme,
+          agenda,
+          keyPoints,
+          decisionsText,
+          tasksText,
+          responsible,
+          deadlines,
+          risks,
+          attachments
+        };
+
+        // Calculate decisions and tasks count strictly by bullet markers
+        const decisionsCount = decisionsText
+          ? decisionsText.split("\n").map((l: string) => l.trim()).filter((l: string) => l.length > 0 && (l.startsWith("-") || l.startsWith("*") || /^\d+\./.test(l))).length
           : 0;
-        const tasksCount = extractedData.tasksText
-          ? extractedData.tasksText.split("\n").map((l: string) => l.trim()).filter((l: string) => l.startsWith("-") || l.startsWith("*") || /^\d+\./.test(l) || l.length > 0).length
+        const tasksCount = tasksText
+          ? tasksText.split("\n").map((l: string) => l.trim()).filter((l: string) => l.length > 0 && (l.startsWith("-") || l.startsWith("*") || /^\d+\./.test(l))).length
           : 0;
 
-        // --- STAGE 6: Saving update on server ---
+        // --- STAGE 7: Saving update on server ---
         sendUpdate({ status: "running", stage: "save", progress: 95, message: "Сохранение протокола..." });
 
         const listPath = protocolsPath();
@@ -188,7 +233,7 @@ export async function POST(request: Request) {
         try {
           protocols = JSON.parse(await readFile(listPath, "utf-8"));
         } catch {
-          // If no stored protocols, use sample
+          // If no stored protocols
         }
 
         const protocolIndex = protocols.findIndex((p) => p.id === protocolId);
@@ -196,15 +241,15 @@ export async function POST(request: Request) {
           protocols[protocolIndex] = {
             ...protocols[protocolIndex],
             transcript: finalTranscript,
-            theme: extractedData.theme || "",
-            agenda: extractedData.agenda || "",
-            keyPoints: extractedData.keyPoints || "",
-            decisionsText: extractedData.decisionsText || "",
-            tasksText: extractedData.tasksText || "",
-            responsible: extractedData.responsible || "",
-            deadlines: extractedData.deadlines || "",
-            risks: extractedData.risks || "",
-            attachments: extractedData.attachments || "",
+            theme,
+            agenda,
+            keyPoints,
+            decisionsText,
+            tasksText,
+            responsible,
+            deadlines,
+            risks,
+            attachments,
             decisions: decisionsCount,
             actionItems: tasksCount,
             status: "review"
@@ -221,7 +266,7 @@ export async function POST(request: Request) {
           progress: 100,
           startedAt: new Date().toISOString().replace("T", " ").substring(0, 16),
           steps: [
-            { id: "source", title: "Источник", description: "Медиафайл загружен и сконвертирован", status: "succeeded" },
+            { id: "source", title: "Источник", description: "Медиафайл загружен", status: "succeeded" },
             { id: "transcribe", title: "Распознавание", description: "Речь успешно переведена в текст", status: "succeeded" },
             { id: "extract", title: "Создание протокола", description: "ИИ выделил структуру протокола", status: "succeeded" },
             { id: "review", title: "Согласование", description: "Протокол готов к согласованию", status: "pending" },
@@ -233,7 +278,7 @@ export async function POST(request: Request) {
           status: "succeeded",
           stage: "done",
           progress: 100,
-          extractedData,
+          extractedData: normalizedData,
           finalTranscript,
           run
         });
@@ -252,6 +297,15 @@ export async function POST(request: Request) {
             await rm(tempDir, { recursive: true, force: true });
           } catch (cleanupErr) {
             console.error("Failed to clean up temp directory:", tempDir, cleanupErr);
+          }
+        }
+        // Cleanup Google File API file
+        if (uploadResultName) {
+          try {
+            const gemini = new GeminiClient();
+            await gemini.deleteFile(uploadResultName);
+          } catch (cleanupCloudErr) {
+            console.error("Failed to clean up file from Google Cloud:", uploadResultName, cleanupCloudErr);
           }
         }
         controller.close();

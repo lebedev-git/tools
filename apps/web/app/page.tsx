@@ -1907,15 +1907,15 @@ function ProtocolsView({
       if (hasTranscript || hasProtocol) {
         setHasRunStarted(true);
         setRunSteps([
-          { id: "split", title: "Разбивка файла", description: "Файл успешно подготовлен и разбит на сегменты", status: "succeeded" },
+          { id: "source", title: "Подготовка файла", description: "Файл успешно подготовлен и загружен in Google Cloud", status: "succeeded" },
           { id: "transcribe", title: "Подготовка стенограммы", description: hasTranscript ? "Стенограмма успешно подготовлена" : "Ожидание подготовки...", status: hasTranscript ? "succeeded" : "pending" },
           { id: "extract", title: "Подготовка протокола", description: hasProtocol ? "Протокол встречи подготовлен" : "Ожидание подготовки...", status: hasProtocol ? "succeeded" : "pending" }
         ]);
       } else if (selectedFile) {
         setHasRunStarted(true);
-        const partsText = chunksCount !== null ? `Определено частей: ${chunksCount}. Готов к запуску` : "Определение частей...";
+        const partsText = chunksCount !== null ? "Файл выбран. Готов к загрузке в Google Cloud" : "Определение параметров файла...";
         setRunSteps([
-          { id: "split", title: "Разбивка файла", description: partsText, status: "pending" },
+          { id: "source", title: "Подготовка файла", description: partsText, status: "pending" },
           { id: "transcribe", title: "Подготовка стенограммы", description: "Ожидание запуска", status: "pending" },
           { id: "extract", title: "Подготовка протокола", description: "Ожидание запуска", status: "pending" }
         ]);
@@ -2002,11 +2002,11 @@ function ProtocolsView({
         }
 
         if (fieldKey === "decisionsText") {
-          const lines = value.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("-") || l.startsWith("*") || /^\d+\./.test(l) || l.length > 0);
+          const lines = value.split("\n").map((l) => l.trim()).filter((l) => l.length > 0 && (l.startsWith("-") || l.startsWith("*") || /^\d+\./.test(l)));
           updatedItem.decisions = lines.length;
         }
         if (fieldKey === "tasksText") {
-          const lines = value.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("-") || l.startsWith("*") || /^\d+\./.test(l) || l.length > 0);
+          const lines = value.split("\n").map((l) => l.trim()).filter((l) => l.length > 0 && (l.startsWith("-") || l.startsWith("*") || /^\d+\./.test(l)));
           updatedItem.actionItems = lines.length;
         }
 
@@ -2021,53 +2021,36 @@ function ProtocolsView({
   const handleRegenerate = async () => {
     if (!protocol) return;
 
-    if (!selectedFile) {
-      alert("Файл не выбран. Пожалуйста, выберите аудио или видео файл.");
-      return;
-    }
-
     setIsGenerating(true);
     setError(null);
-    setProgressMessage("Подготовка файла...");
-    setUploadProgress(5);
-    setPreviewTab("transcript");
     setHasRunStarted(true);
 
-    const partsCount = chunksCount || 1;
-    setRunSteps([
-      { id: "split", title: "Разбивка файла", description: "Сохранение и конвертация файла...", status: "running" },
-      { id: "transcribe", title: "Подготовка стенограммы", description: `Ожидание распознавания речи (${partsCount} частей)...`, status: "pending" },
-      { id: "extract", title: "Подготовка протокола", description: "Ожидание выделения структуры...", status: "pending" }
-    ]);
-
-    setProtocols((prevProtocols) => prevProtocols.map((item) => {
-      if (item.id === protocol.id) {
-        return {
-          ...item,
-          transcript: "",
-          theme: "",
-          agenda: "",
-          keyPoints: "",
-          decisionsText: "",
-          tasksText: "",
-          responsible: "",
-          deadlines: "",
-          risks: "",
-          attachments: "",
-          decisions: 0,
-          actionItems: 0,
-          status: "draft"
-        };
-      }
-      return item;
-    }));
+    if (selectedFile) {
+      setProgressMessage("Подготовка файла...");
+      setUploadProgress(5);
+      setPreviewTab("transcript");
+      setRunSteps([
+        { id: "source", title: "Подготовка файла", description: "Сохранение и оптимизация файла...", status: "running" },
+        { id: "transcribe", title: "Подготовка стенограммы", description: "Ожидание распознавания речи...", status: "pending" },
+        { id: "extract", title: "Подготовка протокола", description: "Ожидание выделения структуры...", status: "pending" }
+      ]);
+    } else {
+      setProgressMessage("Анализ готовой стенограммы встречи...");
+      setUploadProgress(40);
+      setPreviewTab("protocol");
+      setRunSteps([
+        { id: "source", title: "Подготовка файла", description: "Использована готовая стенограмма", status: "succeeded" },
+        { id: "transcribe", title: "Подготовка стенограммы", description: "Стенограмма взята из черновика", status: "succeeded" },
+        { id: "extract", title: "Подготовка протокола", description: "Выделение ИИ структуры протокола...", status: "running" }
+      ]);
+    }
 
     setActiveRun({
       ...activeRun,
       status: "running",
-      progress: 5,
+      progress: selectedFile ? 5 : 40,
       steps: activeRun.steps.map((s) => {
-        if (s.id === "source") return { ...s, status: "running" as const, description: "Загрузка файла на сервер..." };
+        if (s.id === "source") return { ...s, status: "running" as const, description: selectedFile ? "Обработка файла..." : "Использование стенограммы..." };
         return { ...s, status: "pending" as const };
       })
     });
@@ -2075,16 +2058,31 @@ function ProtocolsView({
     try {
       const promptText = promptSettings["protocol.meeting"] || "";
       const transcriptPromptText = promptSettings["protocol.transcript"] || "";
-      const formData = new FormData();
-      formData.append("file", selectedFile);
-      formData.append("protocolId", protocol.id);
-      formData.append("prompt", promptText);
-      formData.append("transcriptPrompt", transcriptPromptText);
+      
+      let response;
+      if (selectedFile) {
+        const formData = new FormData();
+        formData.append("file", selectedFile);
+        formData.append("protocolId", protocol.id);
+        formData.append("prompt", promptText);
+        formData.append("transcriptPrompt", transcriptPromptText);
 
-      const response = await fetch("/api/protocols/runs", {
-        method: "POST",
-        body: formData
-      });
+        response = await fetch("/api/protocols/runs", {
+          method: "POST",
+          body: formData
+        });
+      } else {
+        response = await fetch("/api/protocols/runs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            protocolId: protocol.id,
+            prompt: promptText,
+            transcript: protocol.transcript,
+            transcriptPrompt: transcriptPromptText
+          })
+        });
+      }
 
       if (!response.ok) {
         throw new Error(`Ошибка сервера: ${response.status}`);
@@ -2139,24 +2137,27 @@ function ProtocolsView({
 
           setRunSteps((prevSteps) => {
             return prevSteps.map((step) => {
-              if (update.stage === "upload" || update.stage === "convert" || update.stage === "split") {
-                if (step.id === "split") {
-                  return { ...step, status: "running" as const, description: update.message || "Подготовка и разделение файла..." };
+              // source step
+              if (update.stage === "upload" || update.stage === "convert" || update.stage === "google_upload") {
+                if (step.id === "source") {
+                  return { ...step, status: "running" as const, description: update.message || "Обработка и загрузка файла..." };
                 }
               }
+              // transcribe step
               if (update.stage === "transcribe") {
-                if (step.id === "split") {
-                  return { ...step, status: "succeeded" as const, description: `Файл успешно подготовлен и разбит на ${partsCount} частей` };
+                if (step.id === "source") {
+                  return { ...step, status: "succeeded" as const, description: "Файл успешно подготовлен и загружен в Google Cloud" };
                 }
                 if (step.id === "transcribe") {
                   return { ...step, status: "running" as const, description: update.message || "Распознавание речи..." };
                 }
               }
+              // extract step
               if (update.stage === "extract" || update.stage === "save") {
-                if (step.id === "split") return { ...step, status: "succeeded" as const, description: `Файл успешно подготовлен и разбит на ${partsCount} частей` };
-                if (step.id === "transcribe") return { ...step, status: "succeeded" as const, description: "Стенограмма успешно подготовлена" };
+                if (step.id === "source") return { ...step, status: "succeeded" as const, description: "Файл успешно подготовлен и загружен в Google Cloud" };
+                if (step.id === "transcribe") return { ...step, status: "succeeded" as const, description: "Стенограмма встречи готова" };
                 if (step.id === "extract") {
-                  return { ...step, status: "running" as const, description: update.message || "Извлечение ИИ структуры протокола..." };
+                  return { ...step, status: "running" as const, description: update.message || "Извлечение структуры протокола..." };
                 }
               }
               return step;
@@ -2168,10 +2169,10 @@ function ProtocolsView({
             const finalTranscript = update.finalTranscript || "";
 
             const decisionsCount = ext.decisionsText
-              ? ext.decisionsText.split("\n").map((l: string) => l.trim()).filter((l: string) => l.startsWith("-") || l.startsWith("*") || /^\d+\./.test(l) || l.length > 0).length
+              ? ext.decisionsText.split("\n").map((l: string) => l.trim()).filter((l: string) => l.length > 0 && (l.startsWith("-") || l.startsWith("*") || /^\d+\./.test(l))).length
               : 0;
             const tasksCount = ext.tasksText
-              ? ext.tasksText.split("\n").map((l: string) => l.trim()).filter((l: string) => l.startsWith("-") || l.startsWith("*") || /^\d+\./.test(l) || l.length > 0).length
+              ? ext.tasksText.split("\n").map((l: string) => l.trim()).filter((l: string) => l.length > 0 && (l.startsWith("-") || l.startsWith("*") || /^\d+\./.test(l))).length
               : 0;
 
             const updated = protocols.map((item) => {
@@ -2200,7 +2201,7 @@ function ProtocolsView({
             await saveProtocols(updated);
 
             setRunSteps([
-              { id: "split", title: "Разбивка файла", description: `Файл успешно подготовлен и разбит на ${partsCount} частей`, status: "succeeded" },
+              { id: "source", title: "Подготовка файла", description: "Файл успешно подготовлен и загружен в Google Cloud", status: "succeeded" },
               { id: "transcribe", title: "Подготовка стенограммы", description: "Стенограмма успешно подготовлена", status: "succeeded" },
               { id: "extract", title: "Подготовка протокола", description: "Протокол встречи подготовлен", status: "succeeded" }
             ]);
@@ -2355,7 +2356,7 @@ function ProtocolsView({
                   {selectedFile && (
                     <span style={{ fontSize: "13px", color: "var(--green)", fontWeight: 600, marginTop: "4px" }}>
                       {mediaDuration 
-                        ? `Длительность: ${Math.floor(mediaDuration / 60)} мин ${Math.round(mediaDuration % 60)} сек · Разбивка на ${chunksCount} ${chunksCount === 1 ? "часть" : chunksCount && chunksCount < 5 ? "части" : "частей"}`
+                        ? `Длительность: ${Math.floor(mediaDuration / 60)} мин ${Math.round(mediaDuration % 60)} сек`
                         : "Определение длительности файла..."
                       }
                     </span>
@@ -2378,7 +2379,7 @@ function ProtocolsView({
                 <button
                   type="button"
                   className="primary-button"
-                  disabled={!selectedFile || isGenerating || chunksCount === null}
+                  disabled={isGenerating || (!selectedFile && !(protocol?.transcript && protocol.transcript.trim()))}
                   onClick={handleRegenerate}
                   style={{ 
                     marginTop: "8px",
@@ -2390,8 +2391,8 @@ function ProtocolsView({
                     justifyContent: "center", 
                     gap: "8px",
                     borderRadius: "var(--border-radius)",
-                    cursor: (!selectedFile || isGenerating || chunksCount === null) ? "not-allowed" : "pointer",
-                    opacity: (!selectedFile || isGenerating || chunksCount === null) ? 0.5 : 1
+                    cursor: (isGenerating || (!selectedFile && !(protocol?.transcript && protocol.transcript.trim()))) ? "not-allowed" : "pointer",
+                    opacity: (isGenerating || (!selectedFile && !(protocol?.transcript && protocol.transcript.trim()))) ? 0.5 : 1
                   }}
                 >
                   <Play size={16} />
@@ -2470,67 +2471,176 @@ function ProtocolsView({
                       gap: "16px", 
                       fontSize: "14px", 
                       lineHeight: "1.6",
-                      maxHeight: "350px",
+                      maxHeight: "450px",
                       overflowY: "auto"
                     }}>
-                      {protocol.theme && (
-                        <div>
-                          <strong style={{ color: "var(--text)", fontSize: "14px", display: "block", marginBottom: "4px" }}>Тема встречи</strong>
-                          <div style={{ color: "var(--muted)" }}>{protocol.theme}</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                        <label style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "13px", fontWeight: 700, color: "var(--text)" }}>
+                          Тема встречи
+                          <input 
+                            value={protocol.theme || ""} 
+                            onChange={(e) => handleFieldChange("theme", e.target.value)} 
+                            placeholder="Введите тему встречи" 
+                            style={{ 
+                              padding: "10px", 
+                              border: "1px solid var(--line)", 
+                              borderRadius: "var(--border-radius)",
+                              background: "var(--bg-card)",
+                              color: "var(--text)",
+                              fontSize: "13px"
+                            }}
+                          />
+                        </label>
+                        
+                        <label style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "13px", fontWeight: 700, color: "var(--text)" }}>
+                          Повестка
+                          <textarea 
+                            value={protocol.agenda || ""} 
+                            onChange={(e) => handleFieldChange("agenda", e.target.value)} 
+                            placeholder="Введите повестку дня (список вопросов)" 
+                            style={{ 
+                              padding: "10px", 
+                              border: "1px solid var(--line)", 
+                              borderRadius: "var(--border-radius)",
+                              background: "var(--bg-card)",
+                              color: "var(--text)",
+                              minHeight: "80px",
+                              fontSize: "13px",
+                              resize: "vertical"
+                            }}
+                          />
+                        </label>
+                        
+                        <label style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "13px", fontWeight: 700, color: "var(--text)" }}>
+                          Основные тезисы
+                          <textarea 
+                            value={protocol.keyPoints || ""} 
+                            onChange={(e) => handleFieldChange("keyPoints", e.target.value)} 
+                            placeholder="Основные тезисы обсуждения" 
+                            style={{ 
+                              padding: "10px", 
+                              border: "1px solid var(--line)", 
+                              borderRadius: "var(--border-radius)",
+                              background: "var(--bg-card)",
+                              color: "var(--text)",
+                              minHeight: "100px",
+                              fontSize: "13px",
+                              resize: "vertical"
+                            }}
+                          />
+                        </label>
+                        
+                        <label style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "13px", fontWeight: 700, color: "var(--text)" }}>
+                          Принятые решения
+                          <textarea 
+                            value={protocol.decisionsText || ""} 
+                            onChange={(e) => handleFieldChange("decisionsText", e.target.value)} 
+                            placeholder="Принятые решения (каждое с новой строки, начиная с '-' или '*')" 
+                            style={{ 
+                              padding: "10px", 
+                              border: "1px solid var(--line)", 
+                              borderRadius: "var(--border-radius)",
+                              background: "var(--bg-card)",
+                              color: "var(--text)",
+                              minHeight: "80px",
+                              fontSize: "13px",
+                              resize: "vertical"
+                            }}
+                          />
+                        </label>
+                        
+                        <label style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "13px", fontWeight: 700, color: "var(--text)" }}>
+                          Задачи к выполнению
+                          <textarea 
+                            value={protocol.tasksText || ""} 
+                            onChange={(e) => handleFieldChange("tasksText", e.target.value)} 
+                            placeholder="Задачи к выполнению (каждая с новой строки, начиная с '-' или '*')" 
+                            style={{ 
+                              padding: "10px", 
+                              border: "1px solid var(--line)", 
+                              borderRadius: "var(--border-radius)",
+                              background: "var(--bg-card)",
+                              color: "var(--text)",
+                              minHeight: "80px",
+                              fontSize: "13px",
+                              resize: "vertical"
+                            }}
+                          />
+                        </label>
+                        
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                          <label style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "13px", fontWeight: 700, color: "var(--text)" }}>
+                            Ответственные
+                            <input 
+                              value={protocol.responsible || ""} 
+                              onChange={(e) => handleFieldChange("responsible", e.target.value)} 
+                              placeholder="Ответственные лица" 
+                              style={{ 
+                                padding: "10px", 
+                                border: "1px solid var(--line)", 
+                                borderRadius: "var(--border-radius)",
+                                background: "var(--bg-card)",
+                                color: "var(--text)",
+                                fontSize: "13px"
+                              }}
+                            />
+                          </label>
+                          <label style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "13px", fontWeight: 700, color: "var(--text)" }}>
+                            Сроки
+                            <input 
+                              value={protocol.deadlines || ""} 
+                              onChange={(e) => handleFieldChange("deadlines", e.target.value)} 
+                              placeholder="Сроки выполнения" 
+                              style={{ 
+                                padding: "10px", 
+                                border: "1px solid var(--line)", 
+                                borderRadius: "var(--border-radius)",
+                                background: "var(--bg-card)",
+                                color: "var(--text)",
+                                fontSize: "13px"
+                              }}
+                            />
+                          </label>
                         </div>
-                      )}
-                      {protocol.agenda && (
-                        <div>
-                          <strong style={{ color: "var(--text)", fontSize: "14px", display: "block", marginBottom: "4px" }}>Повестка</strong>
-                          <div style={{ whiteSpace: "pre-wrap", color: "var(--muted)" }}>{protocol.agenda}</div>
-                        </div>
-                      )}
-                      {protocol.keyPoints && (
-                        <div>
-                          <strong style={{ color: "var(--text)", fontSize: "14px", display: "block", marginBottom: "4px" }}>Основные тезисы</strong>
-                          <div style={{ whiteSpace: "pre-wrap", color: "var(--muted)" }}>{protocol.keyPoints}</div>
-                        </div>
-                      )}
-                      {protocol.decisionsText && (
-                        <div>
-                          <strong style={{ color: "var(--text)", fontSize: "14px", display: "block", marginBottom: "4px" }}>Принятые решения</strong>
-                          <div style={{ whiteSpace: "pre-wrap", color: "var(--muted)" }}>{protocol.decisionsText}</div>
-                        </div>
-                      )}
-                      {protocol.tasksText && (
-                        <div>
-                          <strong style={{ color: "var(--text)", fontSize: "14px", display: "block", marginBottom: "4px" }}>Задачи к выполнению</strong>
-                          <div style={{ whiteSpace: "pre-wrap", color: "var(--muted)" }}>{protocol.tasksText}</div>
-                        </div>
-                      )}
-                      {(protocol.responsible || protocol.deadlines) && (
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", borderTop: "1px solid var(--line)", paddingTop: "12px" }}>
-                          {protocol.responsible && (
-                            <div>
-                              <strong style={{ color: "var(--text)", fontSize: "13px", display: "block" }}>Ответственные</strong>
-                              <div style={{ color: "var(--muted)" }}>{protocol.responsible}</div>
-                            </div>
-                          )}
-                          {protocol.deadlines && (
-                            <div>
-                              <strong style={{ color: "var(--text)", fontSize: "13px", display: "block" }}>Сроки</strong>
-                              <div style={{ color: "var(--muted)" }}>{protocol.deadlines}</div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      {protocol.risks && (
-                        <div style={{ borderTop: "1px solid var(--line)", paddingTop: "12px" }}>
-                          <strong style={{ color: "var(--text)", fontSize: "14px", display: "block", marginBottom: "4px" }}>Выявленные риски</strong>
-                          <div style={{ whiteSpace: "pre-wrap", color: "var(--muted)" }}>{protocol.risks}</div>
-                        </div>
-                      )}
-                      {protocol.attachments && (
-                        <div style={{ borderTop: "1px solid var(--line)", paddingTop: "12px" }}>
-                          <strong style={{ color: "var(--text)", fontSize: "13px", display: "block", marginBottom: "4px" }}>Приложения</strong>
-                          <div style={{ color: "var(--muted)" }}>{protocol.attachments}</div>
-                        </div>
-                      )}
+                        
+                        <label style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "13px", fontWeight: 700, color: "var(--text)" }}>
+                          Выявленные риски
+                          <textarea 
+                            value={protocol.risks || ""} 
+                            onChange={(e) => handleFieldChange("risks", e.target.value)} 
+                            placeholder="Выявленные риски и неопределенности" 
+                            style={{ 
+                              padding: "10px", 
+                              border: "1px solid var(--line)", 
+                              borderRadius: "var(--border-radius)",
+                              background: "var(--bg-card)",
+                              color: "var(--text)",
+                              minHeight: "60px",
+                              fontSize: "13px",
+                              resize: "vertical"
+                            }}
+                          />
+                        </label>
+                        
+                        <label style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "13px", fontWeight: 700, color: "var(--text)" }}>
+                          Приложения
+                          <textarea 
+                            value={protocol.attachments || ""} 
+                            onChange={(e) => handleFieldChange("attachments", e.target.value)} 
+                            placeholder="Приложения и полезные ссылки" 
+                            style={{ 
+                              padding: "10px", 
+                              border: "1px solid var(--line)", 
+                              borderRadius: "var(--border-radius)",
+                              background: "var(--bg-card)",
+                              color: "var(--text)",
+                              minHeight: "60px",
+                              fontSize: "13px",
+                              resize: "vertical"
+                            }}
+                          />
+                        </label>
+                      </div>
                     </div>
                   ) : previewTab === "protocol" && isGenerating ? (
                     <div style={{ padding: "24px", textAlign: "center", color: "var(--muted)", background: "var(--bg)", borderRadius: "var(--border-radius)", border: "1px solid var(--line)" }}>
@@ -2541,21 +2651,25 @@ function ProtocolsView({
                       <span>Протокол будет сгенерирован сразу после завершения распознавания речи.</span>
                     </div>
                   ) : (
-                    <div style={{
-                      padding: "16px",
-                      background: "var(--bg)",
-                      borderRadius: "var(--border-radius)",
-                      border: "1px solid var(--line)",
-                      fontSize: "13px",
-                      lineHeight: "1.6",
-                      maxHeight: "350px",
-                      overflowY: "auto",
-                      whiteSpace: "pre-wrap",
-                      color: "var(--muted)",
-                      fontFamily: "monospace"
-                    }}>
-                      {protocol.transcript || (isGenerating ? "Ожидание распознавания первой части..." : "Стенограмма пуста.")}
-                    </div>
+                    <textarea 
+                      style={{
+                        padding: "16px",
+                        background: "var(--bg)",
+                        borderRadius: "var(--border-radius)",
+                        border: "1px solid var(--line)",
+                        fontSize: "13px",
+                        lineHeight: "1.6",
+                        minHeight: "300px",
+                        maxHeight: "450px",
+                        width: "100%",
+                        color: "var(--text)",
+                        fontFamily: "monospace",
+                        resize: "vertical"
+                      }}
+                      value={protocol.transcript || ""}
+                      onChange={(e) => handleFieldChange("transcript", e.target.value)}
+                      placeholder={isGenerating ? "Ожидание распознавания..." : "Стенограмма пуста. Введите текст стенограммы вручную или загрузите файл записи встречи."}
+                    />
                   )}
                 </div>
               )}

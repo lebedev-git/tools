@@ -23,23 +23,6 @@ function runFFmpeg(args: string[]): Promise<void> {
   });
 }
 
-function ensureString(val: unknown): string {
-  if (typeof val === "string") return val;
-  if (Array.isArray(val)) return val.map(item => ensureString(item)).join("\n");
-  if (val === null || val === undefined) return "";
-  if (typeof val === "object") {
-    const obj = val as Record<string, unknown>;
-    return Object.entries(obj)
-      .map(([k, v]) => {
-        const valStr = ensureString(v);
-        if (/^\d+$/.test(k)) return valStr;
-        return `${k}: ${valStr}`;
-      })
-      .join("\n");
-  }
-  return String(val);
-}
-
 function protocolsPath() {
   return join(process.cwd(), getRuntimeConfig().storagePath, "protocols", "list.json");
 }
@@ -192,18 +175,41 @@ export async function POST(request: Request) {
           currentTranscript: finalTranscript
         });
         
-        const extractedData = await gemini.generateProtocol(finalTranscript, prompt);
+        const protocolText = await gemini.generateProtocol(finalTranscript, prompt);
 
-        // Normalize fields to string to prevent any issues with arrays/objects returned by AI
-        const theme = ensureString(extractedData?.theme);
-        const agenda = ensureString(extractedData?.agenda);
-        const keyPoints = ensureString(extractedData?.keyPoints);
-        const decisionsText = ensureString(extractedData?.decisionsText);
-        const tasksText = ensureString(extractedData?.tasksText);
-        const responsible = ensureString(extractedData?.responsible);
-        const deadlines = ensureString(extractedData?.deadlines);
-        const risks = ensureString(extractedData?.risks);
-        const attachments = ensureString(extractedData?.attachments);
+        // Parse decisions and tasks from the free-form Markdown
+        let decisionsCount = 0;
+        let tasksCount = 0;
+        let currentSection = "";
+        const lines = protocolText.split("\n").map((l) => l.trim());
+        const bulletLines = lines.filter((l) => l.length > 0 && (l.startsWith("-") || l.startsWith("*") || /^\d+\./.test(l)));
+
+        for (const line of lines) {
+          if (line.startsWith("#")) {
+            currentSection = line.toLowerCase();
+          } else if (line.length > 0 && (line.startsWith("-") || line.startsWith("*") || /^\d+\./.test(line))) {
+            if (currentSection.includes("решен")) {
+              decisionsCount++;
+            } else if (currentSection.includes("задач") || currentSection.includes("поруч") || currentSection.includes("ответь")) {
+              tasksCount++;
+            }
+          }
+        }
+
+        // Fallback if no specific section matching could find any bullets
+        if (decisionsCount === 0 && tasksCount === 0) {
+          tasksCount = bulletLines.length;
+        }
+
+        const theme = protocolText;
+        const agenda = "";
+        const keyPoints = "";
+        const decisionsText = "";
+        const tasksText = "";
+        const responsible = "";
+        const deadlines = "";
+        const risks = "";
+        const attachments = "";
 
         const normalizedData = {
           theme,
@@ -216,14 +222,6 @@ export async function POST(request: Request) {
           risks,
           attachments
         };
-
-        // Calculate decisions and tasks count strictly by bullet markers
-        const decisionsCount = decisionsText
-          ? decisionsText.split("\n").map((l: string) => l.trim()).filter((l: string) => l.length > 0 && (l.startsWith("-") || l.startsWith("*") || /^\d+\./.test(l))).length
-          : 0;
-        const tasksCount = tasksText
-          ? tasksText.split("\n").map((l: string) => l.trim()).filter((l: string) => l.length > 0 && (l.startsWith("-") || l.startsWith("*") || /^\d+\./.test(l))).length
-          : 0;
 
         // --- STAGE 7: Saving update on server ---
         sendUpdate({ status: "running", stage: "save", progress: 95, message: "Сохранение протокола..." });

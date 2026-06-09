@@ -1,26 +1,138 @@
 import { Document, Paragraph, TextRun, Packer, HeadingLevel, Table, TableRow, TableCell, BorderStyle, WidthType } from "docx";
 import type { ProtocolRecord } from "@tools/protocols";
 
-function parseTextLines(text: string): Paragraph[] {
-  if (!text) return [];
-  const lines = text.split("\n");
-  return lines.map((line) => {
-    // Check if line is bullet point
-    const isBullet = line.trim().startsWith("-") || line.trim().startsWith("*");
-    const cleanText = isBullet ? line.trim().substring(1).trim() : line;
-    
-    return new Paragraph({
-      bullet: isBullet ? { level: 0 } : undefined,
-      spacing: { before: 60, after: 60 },
-      children: [
-        new TextRun({
-          text: cleanText,
-          font: "Aptos",
-          size: "9.5pt"
+function cleanMarkdownFormatting(text: string): string {
+  return text.replace(/\*\*/g, "").replace(/\*/g, "").trim();
+}
+
+function parseMarkdownToParagraphs(markdown: string): Paragraph[] {
+  if (!markdown) return [];
+  const lines = markdown.split("\n");
+  const paragraphs: Paragraph[] = [];
+  
+  let currentTextBuffer: string[] = [];
+
+  const flushTextBuffer = () => {
+    if (currentTextBuffer.length === 0) return;
+    const fullText = currentTextBuffer.join(" ");
+    currentTextBuffer = [];
+
+    // Simple bold parser: **text**
+    const children: TextRun[] = [];
+    const boldRegex = /\*\*(.*?)\*\*/g;
+    let lastIdx = 0;
+    let match;
+    while ((match = boldRegex.exec(fullText)) !== null) {
+      if (match.index > lastIdx) {
+        children.push(new TextRun({ text: fullText.substring(lastIdx, match.index), font: "Aptos", size: "9.5pt" }));
+      }
+      children.push(new TextRun({ text: match[1], bold: true, font: "Aptos", size: "9.5pt" }));
+      lastIdx = boldRegex.lastIndex;
+    }
+    if (lastIdx < fullText.length) {
+      children.push(new TextRun({ text: fullText.substring(lastIdx), font: "Aptos", size: "9.5pt" }));
+    }
+
+    paragraphs.push(
+      new Paragraph({
+        spacing: { before: 60, after: 60 },
+        children
+      })
+    );
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flushTextBuffer();
+      // Empty paragraph for spacing
+      paragraphs.push(new Paragraph({ spacing: { before: 60, after: 60 }, children: [] }));
+      continue;
+    }
+
+    if (trimmed.startsWith("### ")) {
+      flushTextBuffer();
+      paragraphs.push(
+        new Paragraph({
+          heading: HeadingLevel.HEADING_3,
+          spacing: { before: 120, after: 60 },
+          children: [new TextRun({ text: cleanMarkdownFormatting(trimmed.substring(4)), bold: true, font: "Aptos Display", size: "11pt", color: "183B5E" })]
         })
-      ]
-    });
-  });
+      );
+      continue;
+    }
+
+    if (trimmed.startsWith("## ")) {
+      flushTextBuffer();
+      paragraphs.push(
+        new Paragraph({
+          heading: HeadingLevel.HEADING_2,
+          spacing: { before: 180, after: 80 },
+          children: [new TextRun({ text: cleanMarkdownFormatting(trimmed.substring(3)), bold: true, font: "Aptos Display", size: "12pt", color: "183B5E" })]
+        })
+      );
+      continue;
+    }
+
+    if (trimmed.startsWith("# ")) {
+      flushTextBuffer();
+      paragraphs.push(
+        new Paragraph({
+          heading: HeadingLevel.HEADING_1,
+          spacing: { before: 240, after: 120 },
+          children: [new TextRun({ text: cleanMarkdownFormatting(trimmed.substring(2)), bold: true, font: "Aptos Display", size: "14pt", color: "103052" })]
+        })
+      );
+      continue;
+    }
+
+    const isBullet = trimmed.startsWith("- ") || trimmed.startsWith("* ");
+    const isNumbered = /^\d+\.\s+/.test(trimmed);
+
+    if (isBullet || isNumbered) {
+      flushTextBuffer();
+      const contentText = isBullet 
+        ? trimmed.substring(2).trim() 
+        : trimmed.substring(trimmed.indexOf(".") + 1).trim();
+
+      // Simple bold parser for list item content
+      const children: TextRun[] = [];
+      const boldRegex = /\*\*(.*?)\*\*/g;
+      let lastIdx = 0;
+      let match;
+      while ((match = boldRegex.exec(contentText)) !== null) {
+        if (match.index > lastIdx) {
+          children.push(new TextRun({ text: contentText.substring(lastIdx, match.index), font: "Aptos", size: "9.5pt" }));
+        }
+        children.push(new TextRun({ text: match[1], bold: true, font: "Aptos", size: "9.5pt" }));
+        lastIdx = boldRegex.lastIndex;
+      }
+      if (lastIdx < contentText.length) {
+        children.push(new TextRun({ text: contentText.substring(lastIdx), font: "Aptos", size: "9.5pt" }));
+      }
+
+      if (isNumbered) {
+        const numberPrefix = trimmed.match(/^\d+\.\s+/)?.[0] || "";
+        children.unshift(new TextRun({ text: numberPrefix, bold: true, font: "Aptos", size: "9.5pt" }));
+      }
+
+      paragraphs.push(
+        new Paragraph({
+          bullet: isBullet ? { level: 0 } : undefined,
+          spacing: { before: 60, after: 60 },
+          children
+        })
+      );
+      continue;
+    }
+
+    // Add normal line to paragraph buffer
+    currentTextBuffer.push(trimmed);
+  }
+
+  flushTextBuffer();
+
+  return paragraphs;
 }
 
 export async function POST(request: Request) {
@@ -95,36 +207,22 @@ export async function POST(request: Request) {
     // Separator space
     children.push(new Paragraph({ spacing: { before: 120, after: 120 }, children: [] }));
 
-    // Helper function to append section
-    const addSection = (title: string, content?: string) => {
-      if (!content || !content.trim()) return;
+    if (protocol.theme) {
+      children.push(...parseMarkdownToParagraphs(protocol.theme));
+    } else {
       children.push(
         new Paragraph({
-          heading: HeadingLevel.HEADING_2,
-          spacing: { before: 180, after: 80 },
+          spacing: { before: 120, after: 120 },
           children: [
             new TextRun({
-              text: title,
-              bold: true,
-              font: "Aptos Display",
-              size: "12pt",
-              color: "183B5E"
+              text: "Протокол встречи пуст.",
+              font: "Aptos",
+              size: "9.5pt"
             })
           ]
         })
       );
-      children.push(...parseTextLines(content));
-    };
-
-    addSection("Тема обсуждения", protocol.theme);
-    addSection("Повестка дня", protocol.agenda);
-    addSection("Основные тезисы", protocol.keyPoints);
-    addSection("Принятые решения", protocol.decisionsText);
-    addSection("Задачи к выполнению", protocol.tasksText);
-    addSection("Ответственные лица", protocol.responsible);
-    addSection("Сроки выполнения", protocol.deadlines);
-    addSection("Выявленные риски", protocol.risks);
-    addSection("Приложения", protocol.attachments);
+    }
 
     // Footer signature notice
     children.push(new Paragraph({ spacing: { before: 240, after: 120 }, children: [] }));

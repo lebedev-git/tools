@@ -3,6 +3,14 @@ import { getRuntimeConfig, type RuntimeConfig } from "./runtimeConfig";
 export class GeminiClient {
   public constructor(private readonly config: RuntimeConfig = getRuntimeConfig()) {}
 
+  private getBaseUrl(): string {
+    const raw = this.config.geminiBaseUrl;
+    if (raw) {
+      return raw.endsWith("/") ? raw.slice(0, -1) : raw;
+    }
+    return "https://generativelanguage.googleapis.com";
+  }
+
   private static currentKeyIndex = 0;
 
   private getApiKeys(): string[] {
@@ -53,13 +61,16 @@ export class GeminiClient {
         
         let nextModel = modelName;
         if ((is503 || is429) && modelName === "gemini-2.5-flash") {
-          console.warn(`Gemini model ${modelName} overloaded or rate-limited. Falling back to gemini-1.5-flash.`);
-          nextModel = "gemini-1.5-flash";
+          console.warn(`Gemini model ${modelName} overloaded or rate-limited. Falling back to gemini-2.0-flash.`);
+          nextModel = "gemini-2.0-flash";
         }
 
         console.warn(`Gemini API operation failed. Retrying in ${delay}ms... (${retries} attempts left). Error: ${error.message}`);
         await new Promise((resolve) => setTimeout(resolve, delay));
         return this.executeWithRetry(operation, retries - 1, delay * 2, nextModel);
+      }
+      if (is429 && (error.message?.includes("limit: 0") || error.message?.includes("RESOURCE_EXHAUSTED"))) {
+        throw new Error("Превышена квота Gemini (limit: 0). Пожалуйста, убедитесь, что на сервере включен VPN (Google блокирует бесплатные запросы для IP-адресов из вашего региона).");
       }
       throw error;
     }
@@ -67,7 +78,7 @@ export class GeminiClient {
 
   public async uploadFile(fileBuffer: Buffer, mimeType: string, displayName: string): Promise<{ name: string; uri: string }> {
     return this.executeWithRetry(async (apiKey) => {
-      const initUrl = `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${apiKey}`;
+      const initUrl = `${this.getBaseUrl()}/upload/v1beta/files?key=${apiKey}`;
       const initResponse = await fetch(initUrl, {
         method: "POST",
         headers: {
@@ -117,7 +128,7 @@ export class GeminiClient {
 
   public async getFileState(fileName: string): Promise<{ state: string }> {
     return this.executeWithRetry(async (apiKey) => {
-      const url = `https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${apiKey}`;
+      const url = `${this.getBaseUrl()}/v1beta/${fileName}?key=${apiKey}`;
       const response = await fetch(url);
       if (!response.ok) {
         const errText = await response.text();
@@ -132,7 +143,7 @@ export class GeminiClient {
 
   public async deleteFile(fileName: string): Promise<void> {
     return this.executeWithRetry(async (apiKey) => {
-      const url = `https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${apiKey}`;
+      const url = `${this.getBaseUrl()}/v1beta/${fileName}?key=${apiKey}`;
       const response = await fetch(url, { method: "DELETE" });
       if (!response.ok) {
         console.warn(`Failed to delete file ${fileName} from Google Cloud: ${response.status}`);
@@ -142,7 +153,7 @@ export class GeminiClient {
 
   public async transcribeAudioFromFileUri(fileUri: string, mimeType: string, prompt?: string): Promise<string> {
     return this.executeWithRetry(async (apiKey, modelName) => {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+      const url = `${this.getBaseUrl()}/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
       const instructionText = prompt || "Сделай дословную и максимально точную транскрибацию этого аудиофайла на русском языке. Запиши только произнесенный текст встречи, не добавляй от себя никаких комментариев, резюме или вводных фраз.";
 
       const controller = new AbortController();
@@ -200,7 +211,7 @@ export class GeminiClient {
 
   public async transcribeAudio(base64Data: string, mimeType: string = "audio/mp3", prompt?: string): Promise<string> {
     return this.executeWithRetry(async (apiKey, modelName) => {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+      const url = `${this.getBaseUrl()}/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
       const instructionText = prompt || "Сделай дословную и максимально точную транскрибацию этого аудиофайла на русском языке. Запиши только произнесенный текст встречи, не добавляй от себя никаких комментариев, резюме или вводных фраз.";
 
       const controller = new AbortController();
@@ -259,26 +270,12 @@ export class GeminiClient {
   /**
    * Generates a structured protocol JSON from the meeting transcript.
    */
-  public async generateProtocol(transcript: string, prompt: string): Promise<any> {
+  public async generateProtocol(transcript: string, prompt: string): Promise<string> {
     return this.executeWithRetry(async (apiKey, modelName) => {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+      const url = `${this.getBaseUrl()}/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
-      const systemPrompt = `Ты профессиональный секретарь и ассистент. Твоя задача — проанализировать стенограмму или заметки встречи и составить структурированный протокол.
-Ответ должен быть строго в формате JSON без какого-либо дополнительного текста, объяснений или Markdown-разметки.
-JSON должен иметь следующую структуру:
-{
-  "theme": "тема встречи",
-  "agenda": "повестка дня (список вопросов)",
-  "keyPoints": "основные тезисы обсуждения",
-  "decisionsText": "принятые решения",
-  "tasksText": "задачи к выполнению",
-  "responsible": "ответственные лица",
-  "deadlines": "сроки выполнения",
-  "risks": "выявленные риски и неопределенности",
-  "attachments": "приложения и полезные ссылки"
-}
-
-Дополнительная инструкция оператора по обработке:
+      const systemPrompt = `Ты профессиональный секретарь и ассистент. Твоя задача — проанализировать стенограмму или заметки встречи и составить подробный, красиво отформатированный структурированный протокол встречи на русском языке в формате Markdown.
+Отвечай строго текстом протокола в формате Markdown, без каких-либо вводных фраз или комментариев. Действуй строго в соответствии со следующими инструкциями и промптом оператора:
 ${prompt}`;
 
       const controller = new AbortController();
@@ -300,10 +297,7 @@ ${prompt}`;
                   }
                 ]
               }
-            ],
-            generationConfig: {
-              responseMimeType: "application/json"
-            }
+            ]
           }),
           signal: controller.signal
         });
@@ -320,12 +314,7 @@ ${prompt}`;
           throw new Error("Gemini returned an empty or unexpected response for protocol generation.");
         }
 
-        try {
-          return JSON.parse(rawText.trim());
-        } catch (parseError) {
-          console.error("Failed to parse Gemini JSON output:", rawText, parseError);
-          throw new Error("ИИ вернул некорректный формат JSON. Попробуйте еще раз.");
-        }
+        return rawText.trim();
       } catch (error: any) {
         if (error.name === "AbortError") {
           throw new Error("Gemini protocol generation request timed out after 60 seconds.");
@@ -344,7 +333,7 @@ ${prompt}`;
     systemPrompt?: string
   ): Promise<string> {
     return this.executeWithRetry(async (apiKey, modelName) => {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+      const url = `${this.getBaseUrl()}/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
       const sysInstruction = systemPrompt || "Ты — эксперт по визуализации данных и дизайнер дашбордов. Твоя задача — составить детальный визуальный промпт для генератора картинок на основе текстовой инфографики. Напиши подробный промпт на английском языке для генерации красивой, плоской современной инфографики (дашборда 16:9) с чистыми шрифтами, метриками и блоками в деловом технологичном стиле. Укажи в промпте конкретные надписи для ключевых показателей на английском языке.";
 
       const parts: any[] = [

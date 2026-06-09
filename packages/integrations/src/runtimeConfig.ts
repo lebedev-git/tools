@@ -8,6 +8,7 @@ export interface RuntimeConfig {
   llmApiKey?: string;
   llmModel?: string;
   geminiApiKey?: string;
+  geminiBaseUrl?: string;
   outlineApiUrl: string;
   outlineApiKey?: string;
   imageServiceUrl: string;
@@ -34,6 +35,7 @@ export function getRuntimeConfig(env: NodeJS.ProcessEnv = process.env): RuntimeC
     llmApiKey: env.LLM_API_KEY,
     llmModel: env.LLM_MODEL ?? "qwen3.7-max",
     geminiApiKey: env.GEMINI_API_KEY,
+    geminiBaseUrl: env.GEMINI_BASE_URL,
     outlineApiUrl: env.OUTLINE_API_URL ?? "https://ai.147.45.155.90.sslip.io",
     outlineApiKey: env.OUTLINE_API_KEY,
     imageServiceUrl: env.IMAGE_SERVICE_URL ?? "http://automation-codex-service:3007/codex-internal",

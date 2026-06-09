@@ -28,14 +28,19 @@ export class GeminiClient {
     }
   }
 
-  private async executeWithRetry<T>(operation: (apiKey: string) => Promise<T>, retries = 3, delay = 2000): Promise<T> {
+  private async executeWithRetry<T>(
+    operation: (apiKey: string, modelName: string) => Promise<T>,
+    retries = 4,
+    delay = 2000,
+    modelName = "gemini-2.5-flash"
+  ): Promise<T> {
     const keys = this.getApiKeys();
     const apiKey = this.getApiKey(keys);
     try {
-      return await operation(apiKey);
+      return await operation(apiKey, modelName);
     } catch (error: any) {
-      const is503 = error.message?.includes("status 503");
-      const is429 = error.message?.includes("status 429");
+      const is503 = error.message?.includes("status 503") || error.message?.includes("Service Unavailable") || error.message?.includes("temporary");
+      const is429 = error.message?.includes("status 429") || error.message?.includes("Quota exceeded");
       const is500 = error.message?.includes("status 500");
       const isTimeout = error.message?.includes("timed out");
       const isNetwork = error.name === "TypeError" || error.message?.includes("fetch failed");
@@ -45,9 +50,16 @@ export class GeminiClient {
         if (is429 || is503 || isAuthError) {
           this.rotateKey(keys);
         }
+        
+        let nextModel = modelName;
+        if ((is503 || is429) && modelName === "gemini-2.5-flash") {
+          console.warn(`Gemini model ${modelName} overloaded or rate-limited. Falling back to gemini-1.5-flash.`);
+          nextModel = "gemini-1.5-flash";
+        }
+
         console.warn(`Gemini API operation failed. Retrying in ${delay}ms... (${retries} attempts left). Error: ${error.message}`);
         await new Promise((resolve) => setTimeout(resolve, delay));
-        return this.executeWithRetry(operation, retries - 1, delay * 2);
+        return this.executeWithRetry(operation, retries - 1, delay * 2, nextModel);
       }
       throw error;
     }
@@ -129,8 +141,8 @@ export class GeminiClient {
   }
 
   public async transcribeAudioFromFileUri(fileUri: string, mimeType: string, prompt?: string): Promise<string> {
-    return this.executeWithRetry(async (apiKey) => {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    return this.executeWithRetry(async (apiKey, modelName) => {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
       const instructionText = prompt || "Сделай дословную и максимально точную транскрибацию этого аудиофайла на русском языке. Запиши только произнесенный текст встречи, не добавляй от себя никаких комментариев, резюме или вводных фраз.";
 
       const controller = new AbortController();
@@ -187,8 +199,8 @@ export class GeminiClient {
   }
 
   public async transcribeAudio(base64Data: string, mimeType: string = "audio/mp3", prompt?: string): Promise<string> {
-    return this.executeWithRetry(async (apiKey) => {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    return this.executeWithRetry(async (apiKey, modelName) => {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
       const instructionText = prompt || "Сделай дословную и максимально точную транскрибацию этого аудиофайла на русском языке. Запиши только произнесенный текст встречи, не добавляй от себя никаких комментариев, резюме или вводных фраз.";
 
       const controller = new AbortController();
@@ -248,8 +260,8 @@ export class GeminiClient {
    * Generates a structured protocol JSON from the meeting transcript.
    */
   public async generateProtocol(transcript: string, prompt: string): Promise<any> {
-    return this.executeWithRetry(async (apiKey) => {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    return this.executeWithRetry(async (apiKey, modelName) => {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
       const systemPrompt = `Ты профессиональный секретарь и ассистент. Твоя задача — проанализировать стенограмму или заметки встречи и составить структурированный протокол.
 Ответ должен быть строго в формате JSON без какого-либо дополнительного текста, объяснений или Markdown-разметки.
@@ -331,8 +343,8 @@ ${prompt}`;
     photoBase64?: string,
     systemPrompt?: string
   ): Promise<string> {
-    return this.executeWithRetry(async (apiKey) => {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    return this.executeWithRetry(async (apiKey, modelName) => {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
       const sysInstruction = systemPrompt || "Ты — эксперт по визуализации данных и дизайнер дашбордов. Твоя задача — составить детальный визуальный промпт для генератора картинок на основе текстовой инфографики. Напиши подробный промпт на английском языке для генерации красивой, плоской современной инфографики (дашборда 16:9) с чистыми шрифтами, метриками и блоками в деловом технологичном стиле. Укажи в промпте конкретные надписи для ключевых показателей на английском языке.";
 
       const parts: any[] = [

@@ -34,10 +34,8 @@ function executeCommand(conn, cmd, cwd = null) {
 conn.on("ready", async () => {
   console.log("🔌 Connected for diagnostics.");
   try {
-    console.log("\n--- Checking markdownToHtml in utils.tsx on server ---");
-    await executeCommand(conn, "grep -n 'markdownToHtml' apps/web/lib/utils.tsx || echo 'Not found'", "/home/docker/lebedev-git-tools");
-    console.log("\n--- Checking git status on server ---");
-    await executeCommand(conn, "git status", "/home/docker/lebedev-git-tools");
+    console.log("\n--- Resetting git and cleaning untracked files on server ---");
+    await executeCommand(conn, "git reset --hard && git clean -fd", "/home/docker/lebedev-git-tools");
   } catch (error) {
     console.error("Diagnostics failed:", error);
   } finally {

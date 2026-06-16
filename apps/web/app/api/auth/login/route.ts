@@ -20,6 +20,7 @@ export async function POST(request: Request) {
       const secret = process.env.SESSION_SECRET ?? "default_secret_please_change_in_production";
       const token = await signToken({ username, exp: Date.now() + 24 * 60 * 60 * 1000 }, secret);
       
+      const cookieStore = await cookies();
       cookieStore.set({
         name: "session",
         value: token,

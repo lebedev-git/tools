@@ -82,7 +82,7 @@ export async function GET() {
         : null;
 
       const remaining = imageGenLimit ? imageGenLimit.remaining : (acc.quota ?? 3);
-      const maxQuota = acc.quota ?? 3;
+      const maxQuota = Math.max(acc.quota ?? 3, remaining);
 
       return {
         email: acc.email,

@@ -325,7 +325,7 @@ export default function SettingsView({ workspace }: { workspace: "analytics" | "
                       </div>
                       <div>
                         <span style={{ fontSize: "11px", color: "var(--muted)", display: "block" }}>Лимит генераций</span>
-                        <span style={{ fontSize: "13px", fontWeight: "bold" }}>{acc.remaining} из {acc.quota}</span>
+                        <span style={{ fontSize: "13px", fontWeight: "bold" }}>Осталось {acc.remaining} из {acc.quota}</span>
                       </div>
                       <div>
                         <span style={{ fontSize: "11px", color: "var(--muted)", display: "block" }}>Статус</span>
@@ -354,7 +354,7 @@ export default function SettingsView({ workspace }: { workspace: "analytics" | "
                   {accounts.length > 0 && (
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", border: "1px solid var(--line)", borderRadius: "var(--border-radius)", backgroundColor: "var(--bg)", marginTop: "4px" }}>
                       <span style={{ fontSize: "13px", fontWeight: "bold", color: "var(--text)" }}>Итого доступно генераций по всем аккаунтам:</span>
-                      <span style={{ fontSize: "15px", fontWeight: "bold", color: "var(--brand)" }}>{totalRemaining} из {totalQuota} лимитов</span>
+                      <span style={{ fontSize: "15px", fontWeight: "bold", color: "var(--brand)" }}>Осталось {totalRemaining} из {totalQuota} лимитов</span>
                     </div>
                   )}
                 </div>

@@ -34,8 +34,9 @@ function executeCommand(conn, cmd, cwd = null) {
 conn.on("ready", async () => {
   console.log("🔌 Connected for diagnostics.");
   try {
-    console.log("\n--- Resetting git and cleaning untracked files on server ---");
-    await executeCommand(conn, "git reset --hard && git clean -fd", "/home/docker/lebedev-git-tools");
+    console.log("\n--- Testing API availability with session cookie ---");
+    const testToken = "eyJ1c2VybmFtZSI6ImFkbWluIiwiZXhwIjoxNzgxNjkxMDA5OTAxfQ.kBtYWkBppJBcnLqKA3-krYlG2UMrTNHsVsWDbmN9NWA";
+    await executeCommand(conn, `curl -i -s -b "session=${testToken}" http://127.0.0.1:3010/api/analytics/availability?reportType=day1`);
   } catch (error) {
     console.error("Diagnostics failed:", error);
   } finally {

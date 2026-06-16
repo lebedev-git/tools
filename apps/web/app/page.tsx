@@ -130,7 +130,7 @@ export default function Home() {
       return <ProtocolsView activeRun={activeProtocolRun} setActiveRun={setActiveProtocolRun} promptSettings={promptSettings} />;
     }
     if (section === "settings") {
-      return <SettingsView />;
+      return <SettingsView workspace={workspace} />;
     }
     if (section === "prompts") {
       return <PromptsView key={workspace} workspace={workspace} promptSettings={promptSettings} setPromptSettings={setPromptSettings} />;

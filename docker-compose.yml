@@ -12,6 +12,7 @@ services:
       - PORT=3000
     volumes:
       - shared-data:/app/.data
+      - ./image-service-data:/app/image-service-data
     networks:
       - default
       - notebook_net

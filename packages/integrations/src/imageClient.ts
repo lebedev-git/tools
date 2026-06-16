@@ -130,7 +130,7 @@ export class ImageGenerationClient {
     );
     const baseUrl = isInternal ? this.config.imageServiceUrl : "https://codex.sale/v1";
     const apiKey = isInternal ? (this.config.imageServiceApiKey ?? "") : "sk-clb-3APylzCeyo_r4Lapmp_eLgQl5Ul973_z6QLyRWD1L1A";
-    let modelName = options.model ?? (isInternal ? "gpt-5.5" : "gpt-image-2");
+    let modelName = options.model ?? this.config.imageModel ?? (isInternal ? "gpt-5.5" : "gpt-image-2");
     if (!isInternal && modelName === "gpt-5.5") {
       modelName = "gpt-image-2";
     }

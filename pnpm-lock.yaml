@@ -161,7 +161,11 @@ importers:
         specifier: workspace:*
         version: link:../protocols
 
-  packages/integrations: {}
+  packages/integrations:
+    dependencies:
+      '@tools/db':
+        specifier: workspace:*
+        version: link:../db
 
   packages/protocols:
     dependencies:

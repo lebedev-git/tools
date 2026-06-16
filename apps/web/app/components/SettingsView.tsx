@@ -26,11 +26,15 @@ interface KeySettings {
     extraLlmKeys: string[];
     llmModel: string;
     extraGeminiKeys: string[];
+    extraGeminiKeysAnalytics: string[];
+    extraGeminiKeysProtocols: string[];
     extraDeepgramKeys: string[];
     deepgramModel: string;
     extraImageServiceKey: string;
     imageServiceUrl: string;
     imageModel: string;
+    geminiModelAnalytics: string;
+    geminiModelProtocols: string;
   };
   accounts: Account[];
 }
@@ -41,12 +45,15 @@ export default function SettingsView({ workspace }: { workspace: "analytics" | "
   // Custom settings editable states
   const [extraLlmKeys, setExtraLlmKeys] = useState<string[]>([]);
   const [llmModel, setLlmModel] = useState("");
-  const [extraGeminiKeys, setExtraGeminiKeys] = useState<string[]>([]);
+  const [extraGeminiKeysAnalytics, setExtraGeminiKeysAnalytics] = useState<string[]>([]);
+  const [extraGeminiKeysProtocols, setExtraGeminiKeysProtocols] = useState<string[]>([]);
   const [extraDeepgramKeys, setExtraDeepgramKeys] = useState<string[]>([]);
   const [deepgramModel, setDeepgramModel] = useState("");
   const [extraImageServiceKey, setExtraImageServiceKey] = useState("");
   const [imageServiceUrl, setImageServiceUrl] = useState("");
   const [imageModel, setImageModel] = useState("");
+  const [geminiModelAnalytics, setGeminiModelAnalytics] = useState("");
+  const [geminiModelProtocols, setGeminiModelProtocols] = useState("");
   const [accounts, setAccounts] = useState<Account[]>([]);
 
   // Temp inputs for adding new keys
@@ -61,6 +68,41 @@ export default function SettingsView({ workspace }: { workspace: "analytics" | "
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const refreshAccounts = async () => {
+    setIsRefreshing(true);
+    try {
+      const response = await fetch("/api/settings/keys", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "refresh_limits" })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.accounts) {
+          setAccounts(data.accounts);
+          setKeys(prev => prev ? { ...prev, accounts: data.accounts } : null);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to refresh limits:", err);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    if (workspace === "analytics") {
+      interval = setInterval(() => {
+        void refreshAccounts();
+      }, 30000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [workspace]);
 
   // Load keys and accounts
   useEffect(() => {
@@ -74,12 +116,15 @@ export default function SettingsView({ workspace }: { workspace: "analytics" | "
             setKeys(data);
             setExtraLlmKeys(data.customSettings.extraLlmKeys || []);
             setLlmModel(data.customSettings.llmModel || "");
-            setExtraGeminiKeys(data.customSettings.extraGeminiKeys || []);
+            setExtraGeminiKeysAnalytics(data.customSettings.extraGeminiKeysAnalytics || []);
+            setExtraGeminiKeysProtocols(data.customSettings.extraGeminiKeysProtocols || []);
             setExtraDeepgramKeys(data.customSettings.extraDeepgramKeys || []);
             setDeepgramModel(data.customSettings.deepgramModel || "");
             setExtraImageServiceKey(data.customSettings.extraImageServiceKey || "");
             setImageServiceUrl(data.customSettings.imageServiceUrl || "");
             setImageModel(data.customSettings.imageModel || "");
+            setGeminiModelAnalytics(data.customSettings.geminiModelAnalytics || "gemini-2.5-flash");
+            setGeminiModelProtocols(data.customSettings.geminiModelProtocols || "gemini-2.5-flash");
             setAccounts(data.accounts || []);
           }
         }
@@ -94,14 +139,18 @@ export default function SettingsView({ workspace }: { workspace: "analytics" | "
   }, []);
 
   // Helpers to add/remove keys
-  const addKey = (type: "llm" | "gemini" | "deepgram") => {
+  const addKey = (type: "llm" | "gemini-analytics" | "gemini-protocols" | "deepgram") => {
     if (type === "llm") {
       if (!newLlmKey.trim()) return;
       setExtraLlmKeys([...extraLlmKeys, newLlmKey.trim()]);
       setNewLlmKey("");
-    } else if (type === "gemini") {
+    } else if (type === "gemini-analytics") {
       if (!newGeminiKey.trim()) return;
-      setExtraGeminiKeys([...extraGeminiKeys, newGeminiKey.trim()]);
+      setExtraGeminiKeysAnalytics([...extraGeminiKeysAnalytics, newGeminiKey.trim()]);
+      setNewGeminiKey("");
+    } else if (type === "gemini-protocols") {
+      if (!newGeminiKey.trim()) return;
+      setExtraGeminiKeysProtocols([...extraGeminiKeysProtocols, newGeminiKey.trim()]);
       setNewGeminiKey("");
     } else if (type === "deepgram") {
       if (!newDeepgramKey.trim()) return;
@@ -110,11 +159,13 @@ export default function SettingsView({ workspace }: { workspace: "analytics" | "
     }
   };
 
-  const removeKey = (type: "llm" | "gemini" | "deepgram", index: number) => {
+  const removeKey = (type: "llm" | "gemini-analytics" | "gemini-protocols" | "deepgram", index: number) => {
     if (type === "llm") {
       setExtraLlmKeys(extraLlmKeys.filter((_, i) => i !== index));
-    } else if (type === "gemini") {
-      setExtraGeminiKeys(extraGeminiKeys.filter((_, i) => i !== index));
+    } else if (type === "gemini-analytics") {
+      setExtraGeminiKeysAnalytics(extraGeminiKeysAnalytics.filter((_, i) => i !== index));
+    } else if (type === "gemini-protocols") {
+      setExtraGeminiKeysProtocols(extraGeminiKeysProtocols.filter((_, i) => i !== index));
     } else if (type === "deepgram") {
       setExtraDeepgramKeys(extraDeepgramKeys.filter((_, i) => i !== index));
     }
@@ -146,12 +197,15 @@ export default function SettingsView({ workspace }: { workspace: "analytics" | "
     const payload = {
       extraLlmKeys,
       llmModel,
-      extraGeminiKeys,
+      extraGeminiKeysAnalytics,
+      extraGeminiKeysProtocols,
       extraDeepgramKeys,
       deepgramModel,
       extraImageServiceKey,
       imageServiceUrl,
       imageModel,
+      geminiModelAnalytics,
+      geminiModelProtocols,
       accounts
     };
     try {
@@ -221,75 +275,67 @@ export default function SettingsView({ workspace }: { workspace: "analytics" | "
         {/* ========================================================================= */}
         {workspace === "analytics" && (
           <>
-            {/* 1. ANALYTICS BLOCK */}
+            {/* 1. MODEL / SYSTEM BLOCK FOR ANALYTICS */}
             <section className="panel settings-panel" style={{ padding: "24px", display: "grid", gap: "20px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "10px", borderBottom: "1px solid var(--line)", paddingBottom: "12px" }}>
                 <Sparkles size={20} style={{ color: "var(--brand)" }} />
-                <h2 style={{ margin: 0, fontSize: "18px" }}>Настройки Аналитики (LLM)</h2>
+                <h2 style={{ margin: 0, fontSize: "18px" }}>Используемая модель ИИ (Аналитика)</h2>
               </div>
-
-              {/* Model selection */}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
                 <label style={{ display: "grid", gap: "6px" }}>
-                  <span style={{ fontSize: "12px", fontWeight: "bold", color: "var(--muted)" }}>Модель по умолчанию (.env)</span>
+                  <span style={{ fontSize: "12px", fontWeight: "bold", color: "var(--muted)" }}>Модель анализа по умолчанию</span>
                   <input 
                     type="text" 
-                    value={keys.systemSettings.llmModelDefault} 
+                    value="gemini-2.5-flash" 
                     disabled 
                     style={{ opacity: 0.6, cursor: "not-allowed", padding: "10px", border: "1px solid var(--line)", borderRadius: "var(--border-radius)", backgroundColor: "var(--bg)" }}
                   />
                 </label>
                 <label style={{ display: "grid", gap: "6px" }}>
-                  <span style={{ fontSize: "12px", fontWeight: "bold", color: "var(--text)" }}>Кастомная модель (оставьте пустой для модели по умолчанию)</span>
+                  <span style={{ fontSize: "12px", fontWeight: "bold", color: "var(--text)" }}>Выбранная модель Gemini для аналитики</span>
                   <input 
                     type="text" 
-                    value={llmModel} 
-                    onChange={(e) => setLlmModel(e.target.value)} 
-                    placeholder="Например, llama-3.3-70b-versatile"
+                    value={geminiModelAnalytics} 
+                    onChange={(e) => setGeminiModelAnalytics(e.target.value)}
+                    placeholder="Например, gemini-2.5-flash"
                     style={{ padding: "10px", border: "1px solid var(--line)", borderRadius: "var(--border-radius)" }}
                   />
                 </label>
               </div>
 
-              {/* Keys list */}
-              <div style={{ display: "grid", gap: "12px" }}>
-                <span style={{ fontSize: "12px", fontWeight: "bold", color: "var(--text)" }}>Список подключенных API-ключей Groq / LLM</span>
-                
+              {/* Gemini Keys for Analytics */}
+              <div style={{ display: "grid", gap: "12px", borderTop: "1px solid var(--line)", paddingTop: "16px" }}>
+                <span style={{ fontSize: "12px", fontWeight: "bold", color: "var(--text)" }}>Список API-ключей Google Gemini для Аналитики</span>
                 <div style={{ display: "grid", gap: "8px" }}>
-                  {/* System keys */}
-                  {keys.systemSettings.llmApiKeysMasked.map((key, index) => (
-                    <div key={`sys-llm-${index}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", border: "1px solid var(--line)", borderRadius: "var(--border-radius)", backgroundColor: "var(--bg)", opacity: 0.85 }}>
+                  {keys.systemSettings.geminiApiKeysMasked.map((key, index) => (
+                    <div key={`sys-gem-an-${index}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", border: "1px solid var(--line)", borderRadius: "var(--border-radius)", backgroundColor: "var(--bg)", opacity: 0.85 }}>
                       <code style={{ fontSize: "13px" }}>{key}</code>
                     </div>
                   ))}
-
-                  {/* Custom keys */}
-                  {extraLlmKeys.map((key, index) => (
-                    <div key={`custom-llm-${index}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", border: "1px solid var(--line)", borderRadius: "var(--border-radius)", backgroundColor: "var(--bg)" }}>
+                  {extraGeminiKeysAnalytics.map((key, index) => (
+                    <div key={`custom-gem-an-${index}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", border: "1px solid var(--line)", borderRadius: "var(--border-radius)", backgroundColor: "var(--bg)" }}>
                       <code style={{ fontSize: "13px" }}>{key.length > 24 ? `${key.slice(0, 12)}...${key.slice(-8)}` : key}</code>
                       <button 
                         type="button" 
-                        onClick={() => removeKey("llm", index)} 
+                        onClick={() => removeKey("gemini-analytics", index)} 
                         style={{ color: "var(--red)", border: "none", background: "none", cursor: "pointer", display: "flex", alignItems: "center", padding: "4px" }}
                       >
                         <Trash2 size={14} />
                       </button>
                     </div>
                   ))}
-
-                  {/* Add key input */}
                   <div style={{ display: "flex", gap: "8px", marginTop: "4px" }}>
                     <input 
                       type="text" 
-                      value={newLlmKey} 
-                      onChange={(e) => setNewLlmKey(e.target.value)} 
-                      placeholder="Вставьте новый API-ключ"
+                      value={newGeminiKey} 
+                      onChange={(e) => setNewGeminiKey(e.target.value)} 
+                      placeholder="Вставьте новый API-ключ Gemini"
                       style={{ flex: 1, padding: "10px 14px", border: "1px solid var(--line)", borderRadius: "var(--border-radius)", fontSize: "13px" }}
-                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addKey("llm"); } }}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addKey("gemini-analytics"); } }}
                     />
                     <button 
                       type="button" 
-                      onClick={() => addKey("llm")}
+                      onClick={() => addKey("gemini-analytics")}
                       className="secondary-button"
                       style={{ display: "flex", alignItems: "center", gap: "4px", padding: "10px 18px", height: "auto" }}
                     >
@@ -305,7 +351,18 @@ export default function SettingsView({ workspace }: { workspace: "analytics" | "
             <section className="panel settings-panel" style={{ padding: "24px", display: "grid", gap: "20px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "10px", borderBottom: "1px solid var(--line)", paddingBottom: "12px" }}>
                 <Image size={20} style={{ color: "var(--brand)" }} />
-                <h2 style={{ margin: 0, fontSize: "18px" }}>Аккаунты генерации инфографики (GPT / ChatGPT2API)</h2>
+                <h2 style={{ margin: 0, fontSize: "18px", flex: 1 }}>Аккаунты генерации инфографики (GPT / ChatGPT2API)</h2>
+                <button
+                  type="button"
+                  onClick={refreshAccounts}
+                  disabled={isRefreshing}
+                  className="secondary-button"
+                  style={{ display: "flex", alignItems: "center", gap: "8px", padding: "6px 14px", height: "auto" }}
+                  title="Обновить квоты и статус аккаунтов"
+                >
+                  <RefreshCw className={cx(isRefreshing && "spin")} size={14} />
+                  <span>{isRefreshing ? "Обновление..." : "Обновить лимиты"}</span>
+                </button>
               </div>
 
               {/* List of GPT Accounts */}
@@ -397,7 +454,6 @@ export default function SettingsView({ workspace }: { workspace: "analytics" | "
             </section>
           </>
         )}
-
         {/* ========================================================================= */}
         {/* PROTOCOLS SECTION (ONLY FOR PROTOCOLS WORKSPACE)                          */}
         {/* ========================================================================= */}
@@ -408,8 +464,31 @@ export default function SettingsView({ workspace }: { workspace: "analytics" | "
               <h2 style={{ margin: 0, fontSize: "18px" }}>Настройки Протоколов (Gemini & Deepgram)</h2>
             </div>
 
-            {/* Model selection Deepgram */}
+            {/* Model selection Gemini */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+              <label style={{ display: "grid", gap: "6px" }}>
+                <span style={{ fontSize: "12px", fontWeight: "bold", color: "var(--muted)" }}>Модель Gemini по умолчанию</span>
+                <input 
+                  type="text" 
+                  value="gemini-2.5-flash" 
+                  disabled 
+                  style={{ opacity: 0.6, cursor: "not-allowed", padding: "10px", border: "1px solid var(--line)", borderRadius: "var(--border-radius)", backgroundColor: "var(--bg)" }}
+                />
+              </label>
+              <label style={{ display: "grid", gap: "6px" }}>
+                <span style={{ fontSize: "12px", fontWeight: "bold", color: "var(--text)" }}>Выбранная модель Gemini для протоколов</span>
+                <input 
+                  type="text" 
+                  value={geminiModelProtocols} 
+                  onChange={(e) => setGeminiModelProtocols(e.target.value)} 
+                  placeholder="Например, gemini-2.5-flash"
+                  style={{ padding: "10px", border: "1px solid var(--line)", borderRadius: "var(--border-radius)" }}
+                />
+              </label>
+            </div>
+
+            {/* Model selection Deepgram */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", borderTop: "1px solid var(--line)", paddingTop: "16px" }}>
               <label style={{ display: "grid", gap: "6px" }}>
                 <span style={{ fontSize: "12px", fontWeight: "bold", color: "var(--muted)" }}>Модель Deepgram по умолчанию</span>
                 <input 
@@ -433,19 +512,19 @@ export default function SettingsView({ workspace }: { workspace: "analytics" | "
 
             {/* Gemini Keys */}
             <div style={{ display: "grid", gap: "12px", borderTop: "1px solid var(--line)", paddingTop: "16px" }}>
-              <span style={{ fontSize: "12px", fontWeight: "bold", color: "var(--text)" }}>Список API-ключей Google Gemini</span>
+              <span style={{ fontSize: "12px", fontWeight: "bold", color: "var(--text)" }}>Список API-ключей Google Gemini для Протоколов</span>
               <div style={{ display: "grid", gap: "8px" }}>
                 {keys.systemSettings.geminiApiKeysMasked.map((key, index) => (
-                  <div key={`sys-gem-${index}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", border: "1px solid var(--line)", borderRadius: "var(--border-radius)", backgroundColor: "var(--bg)", opacity: 0.85 }}>
+                  <div key={`sys-gem-pr-${index}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", border: "1px solid var(--line)", borderRadius: "var(--border-radius)", backgroundColor: "var(--bg)", opacity: 0.85 }}>
                     <code style={{ fontSize: "13px" }}>{key}</code>
                   </div>
                 ))}
-                {extraGeminiKeys.map((key, index) => (
-                  <div key={`custom-gem-${index}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", border: "1px solid var(--line)", borderRadius: "var(--border-radius)", backgroundColor: "var(--bg)" }}>
+                {extraGeminiKeysProtocols.map((key, index) => (
+                  <div key={`custom-gem-pr-${index}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", border: "1px solid var(--line)", borderRadius: "var(--border-radius)", backgroundColor: "var(--bg)" }}>
                     <code style={{ fontSize: "13px" }}>{key.length > 24 ? `${key.slice(0, 12)}...${key.slice(-8)}` : key}</code>
                     <button 
                       type="button" 
-                      onClick={() => removeKey("gemini", index)} 
+                      onClick={() => removeKey("gemini-protocols", index)} 
                       style={{ color: "var(--red)", border: "none", background: "none", cursor: "pointer", display: "flex", alignItems: "center", padding: "4px" }}
                     >
                       <Trash2 size={14} />
@@ -454,16 +533,16 @@ export default function SettingsView({ workspace }: { workspace: "analytics" | "
                 ))}
                 <div style={{ display: "flex", gap: "8px", marginTop: "4px" }}>
                   <input 
-                    type="text" 
-                    value={newGeminiKey} 
-                    onChange={(e) => setNewGeminiKey(e.target.value)} 
-                    placeholder="Вставьте новый API-ключ Gemini"
-                    style={{ flex: 1, padding: "10px 14px", border: "1px solid var(--line)", borderRadius: "var(--border-radius)", fontSize: "13px" }}
-                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addKey("gemini"); } }}
-                  />
+                      type="text" 
+                      value={newGeminiKey} 
+                      onChange={(e) => setNewGeminiKey(e.target.value)} 
+                      placeholder="Вставьте новый API-ключ Gemini"
+                      style={{ flex: 1, padding: "10px 14px", border: "1px solid var(--line)", borderRadius: "var(--border-radius)", fontSize: "13px" }}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addKey("gemini-protocols"); } }}
+                    />
                   <button 
                     type="button" 
-                    onClick={() => addKey("gemini")}
+                    onClick={() => addKey("gemini-protocols")}
                     className="secondary-button"
                     style={{ display: "flex", alignItems: "center", gap: "4px", padding: "10px 18px", height: "auto" }}
                   >

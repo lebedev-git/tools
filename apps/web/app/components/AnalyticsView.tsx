@@ -52,6 +52,26 @@ import {
   type RunStep
 } from "../../lib/utils";
 
+interface SavedAnalyticsRun {
+  sessionId: string;
+  day2SessionId?: string;
+  stepsToRun: string[];
+  currentStepIndex: number;
+  currentJobId: number;
+  accumulatedReports: Record<string, string>;
+  accumulatedImageUrl: string;
+  customReportName: string;
+  promptSettings: Record<string, string>;
+  enabledBlocks: AnalyticsBlockId[];
+  assetFiles: Record<string, any>;
+  customAnswers: any;
+  startTime: number;
+  stepDurations: Record<string, number>;
+  useDay1Input: boolean;
+  useDay1Output: boolean;
+  useDay2: boolean;
+}
+
 interface AnalyticsViewProps {
   promptSettings: Record<AnalyticsBlockId, string>;
   activeRun: ProcessRun;
@@ -469,6 +489,255 @@ export default function AnalyticsView({ promptSettings, activeRun, setActiveRun 
     }
   }
 
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
+
+  const pollAnalyticsJob = async (savedRun: SavedAnalyticsRun) => {
+    setIsRunning(true);
+    setHasRunStarted(true);
+
+    const initialRunSteps = savedRun.stepsToRun.map(stepId => {
+      let title = "";
+      let description = "";
+      if (stepId === "day1") {
+        title = "ИИ-анализ: День 1";
+        description = "Аналитическая обработка отзывов первого дня";
+      } else if (stepId === "day2") {
+        title = "ИИ-анализ: День 2";
+        description = "Сравнительный анализ отзывов второго дня";
+      } else if (stepId === "overall") {
+        title = "Синтез результатов";
+        description = "Сведение данных первого и второго дней";
+      } else if (stepId === "products") {
+        title = "Анализ продуктов";
+        description = "Анализ концепций цифровых продуктов";
+      } else if (stepId === "infographic-prompt") {
+        title = "Подготовка промта инфографики";
+        description = "Генерация промта по материалам сессии";
+      } else if (stepId === "infographic-image") {
+        title = "Генерация инфографики";
+        description = "Создание дашборда-инфографики";
+      } else if (stepId === "publish") {
+        title = "Публикация в Open Notebook";
+        description = "Сохранение и выгрузка отчетов в Open Notebook";
+      }
+
+      let status: "pending" | "running" | "succeeded" | "failed" = "pending";
+      const idx = savedRun.stepsToRun.indexOf(stepId);
+      if (idx < savedRun.currentStepIndex) {
+        status = "succeeded";
+      } else if (idx === savedRun.currentStepIndex) {
+        status = "running";
+      }
+
+      return { id: stepId, title, description, status };
+    });
+
+    setRunSteps(initialRunSteps);
+    setExecutionTimes(savedRun.stepDurations);
+
+    const hasAnyReport = Object.keys(savedRun.accumulatedReports).length > 0;
+    if (hasAnyReport || savedRun.accumulatedImageUrl) {
+      setRunResult({
+        status: "ready",
+        message: "Идет обработка шагов...",
+        stageReports: savedRun.accumulatedReports,
+        infographicImageUrl: savedRun.accumulatedImageUrl
+      });
+    }
+
+    if (timerRef.current) clearInterval(timerRef.current);
+
+    let currentStepStart = Date.now();
+    const stepId = savedRun.stepsToRun[savedRun.currentStepIndex];
+
+    timerRef.current = setInterval(() => {
+      const now = Date.now();
+      setTotalTime(Math.max(1, Math.round((now - savedRun.startTime) / 1000)));
+      if (stepId) {
+        const secs = Math.max(1, Math.round((now - currentStepStart) / 1000));
+        setExecutionTimes(prev => ({
+          ...prev,
+          [stepId]: secs
+        }));
+      }
+    }, 1000);
+
+    try {
+      let jobResult = null;
+      const jobId = savedRun.currentJobId;
+
+      while (true) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        const checkRes = await fetch(`/api/jobs?id=${jobId}`);
+        if (!checkRes.ok) {
+          throw new Error(`Ошибка опроса статуса задачи ${jobId}`);
+        }
+        const job = await checkRes.json();
+        if (job.status === "succeeded") {
+          jobResult = JSON.parse(job.result);
+          break;
+        } else if (job.status === "failed") {
+          throw new Error(job.message || job.error || "Ошибка фоновой аналитики");
+        }
+        if (job.message) {
+          setRunSteps(prev => prev.map(s => s.id === stepId ? { ...s, description: job.message } : s));
+        }
+      }
+
+      const data = jobResult;
+
+      if (data.stageReports) {
+        Object.assign(savedRun.accumulatedReports, data.stageReports);
+      }
+      if (data.infographicImageUrl) {
+        savedRun.accumulatedImageUrl = data.infographicImageUrl;
+      }
+
+      const duration = Math.max(1, Math.round((Date.now() - currentStepStart) / 1000));
+      savedRun.stepDurations[stepId] = duration;
+      setExecutionTimes(prev => ({ ...prev, [stepId]: duration }));
+
+      setRunSteps(prev => prev.map(s => s.id === stepId ? { ...s, status: "succeeded" as const } : s));
+
+      savedRun.currentStepIndex += 1;
+
+      if (savedRun.currentStepIndex < savedRun.stepsToRun.length) {
+        const nextStepId = savedRun.stepsToRun[savedRun.currentStepIndex];
+
+        const response = await fetch("/api/analytics/runs", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            reportType: "day1",
+            day1Date: savedRun.sessionId,
+            day2Date: savedRun.day2SessionId,
+            selectedBlocks: [nextStepId],
+            customReportName: savedRun.customReportName,
+            stagePrompts: {
+              [nextStepId === "infographic-prompt" ? "infographic-prompt" : nextStepId === "infographic-image" ? "infographic-image" : nextStepId]: 
+                savedRun.promptSettings[(nextStepId === "infographic-prompt" || nextStepId === "infographic-image" ? "infographic" : nextStepId) as AnalyticsBlockId]
+            },
+            stageReports: savedRun.accumulatedReports,
+            assetFiles: savedRun.assetFiles,
+            customAnswers: savedRun.customAnswers ?? undefined
+          })
+        });
+
+        if (!response.ok) {
+          const errData = await response.json();
+          throw new Error(errData.message || `Ошибка выполнения этапа ${nextStepId}`);
+        }
+
+        const runInit = await response.json();
+        savedRun.currentJobId = runInit.jobId;
+
+        localStorage.setItem("active_analytics_run", JSON.stringify(savedRun));
+
+        void pollAnalyticsJob(savedRun);
+      } else {
+        if (timerRef.current) clearInterval(timerRef.current);
+
+        const finalReportMarkdown = [
+          savedRun.accumulatedReports.day1,
+          savedRun.accumulatedReports.day2,
+          savedRun.accumulatedReports.overall,
+          savedRun.accumulatedReports.products,
+          savedRun.accumulatedReports["infographic-prompt"] ? `# Подготовка промта для инфографики\n\n${savedRun.accumulatedReports["infographic-prompt"]}` : null,
+          savedRun.accumulatedReports["infographic-image"] ? `# Инфографика\n\n${savedRun.accumulatedReports["infographic-image"]}` : null
+        ]
+          .filter(Boolean)
+          .join("\n\n---\n\n");
+
+        const finalResult: AnalyticsRunResult = {
+          status: "ready",
+          message: "Данные обработаны успешно.",
+          reportMarkdown: finalReportMarkdown,
+          infographicImageUrl: savedRun.accumulatedImageUrl,
+          stageReports: savedRun.accumulatedReports,
+          stats: data.stats || undefined
+        };
+
+        setRunResult(finalResult);
+
+        try {
+          const historyStr = localStorage.getItem("analytics_runs_history") || "[]";
+          const history = JSON.parse(historyStr);
+          history.push({
+            timestamp: Date.now(),
+            durations: savedRun.stepDurations
+          });
+          localStorage.setItem("analytics_runs_history", JSON.stringify(history));
+        } catch (err) {
+          console.error("Failed to save run history to localStorage:", err);
+        }
+
+        setActiveRun({
+          id: `analytics-day1-${savedRun.sessionId}`,
+          toolType: "analytics",
+          title: `Аналитика ${formatDate(savedRun.sessionId)}`,
+          status: "succeeded",
+          progress: 100,
+          startedAt: new Date(savedRun.startTime).toISOString(),
+          steps: initialRunSteps.map(s => ({ id: s.id, title: s.title, description: s.description, status: "succeeded" as const }))
+        });
+
+        localStorage.removeItem("active_analytics_run");
+        setIsRunning(false);
+      }
+    } catch (error) {
+      console.error(error);
+      if (timerRef.current) clearInterval(timerRef.current);
+
+      const errorMessage = error instanceof Error ? error.message : "Ошибка при генерации отчетов.";
+      setRunResult({
+        status: "error",
+        message: errorMessage
+      });
+
+      setRunSteps(prev => prev.map(s => {
+        if (s.id === stepId) return { ...s, status: "failed" as const };
+        return s;
+      }));
+
+      setActiveRun(prev => ({ ...prev, status: "failed", progress: 100 }));
+
+      localStorage.removeItem("active_analytics_run");
+      setIsRunning(false);
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const savedRunStr = localStorage.getItem("active_analytics_run");
+      if (savedRunStr) {
+        try {
+          const savedRun = JSON.parse(savedRunStr) as SavedAnalyticsRun;
+          if (savedRun && !isRunning) {
+            setSelectedSession(savedRun.sessionId);
+            if (savedRun.day2SessionId) setSelectedDay2Date(savedRun.day2SessionId);
+            setCustomReportName(savedRun.customReportName);
+            setEnabledBlocks(new Set(savedRun.enabledBlocks));
+            setUseDay1Input(savedRun.useDay1Input);
+            setUseDay1Output(savedRun.useDay1Output);
+            setUseDay2(savedRun.useDay2);
+
+            void pollAnalyticsJob(savedRun);
+          }
+        } catch (e) {
+          console.error("Failed to restore active analytics run:", e);
+        }
+      }
+    }
+  }, []);
+
   async function handleRunClick() {
     if (!canRun || !currentSession) {
       return;
@@ -494,8 +763,7 @@ export default function AnalyticsView({ promptSettings, activeRun, setActiveRun 
     setRunResult(null);
     setExecutionTimes({});
     setTotalTime(0);
-    
-    // Initialize execution steps graph
+
     const initialRunSteps = stepsToRun.map(stepId => {
       let title = "";
       let description = "";
@@ -523,7 +791,7 @@ export default function AnalyticsView({ promptSettings, activeRun, setActiveRun 
       }
       return { id: stepId, title, description, status: "pending" as const };
     });
-    
+
     setRunSteps(initialRunSteps);
 
     setActiveRun({
@@ -532,176 +800,75 @@ export default function AnalyticsView({ promptSettings, activeRun, setActiveRun 
       progress: 10,
       steps: initialRunSteps.map(s => ({ id: s.id, title: s.title, description: s.description, status: "pending" as const }))
     });
-    
-    const startTime = getNow();
-    const stepDurations: Record<string, number> = {};
-    const accumulatedReports: Record<string, string> = {};
-    let accumulatedImageUrl = "";
-    let runAnswersContext = useScenarioBuilder ? scenarioData : null;
-    let finalStats = null;
-    let currentStepId = "";
-    let currentStepStart = 0;
 
-    const interval = setInterval(() => {
-      const now = getNow();
-      setTotalTime(Math.max(1, Math.round((now - startTime) / 1000)));
-      if (currentStepId && currentStepStart) {
-        const secs = Math.max(1, Math.round((now - currentStepStart) / 1000));
-        setExecutionTimes(prev => ({ ...prev, [currentStepId]: secs }));
-      }
-    }, 1000);
+    const startTime = Date.now();
+    const runAnswersContext = useScenarioBuilder ? scenarioData : null;
 
     try {
-      for (const stepId of stepsToRun) {
-        currentStepId = stepId;
-        currentStepStart = getNow();
-        
-        setRunSteps(prev => prev.map(s => s.id === stepId ? { ...s, status: "running" as const } : s));
+      const stepId = stepsToRun[0];
 
-
-
-        // Filter the answers based on unchecked sections
-        let customAnswersPayload = runAnswersContext;
-        if (runAnswersContext) {
-          customAnswersPayload = {
-            ...runAnswersContext,
-            day1Input: useDay1Input ? runAnswersContext.day1Input : { questionList: [], answers: [] },
-            day1Output: useDay1Output ? runAnswersContext.day1Output : { questionList: [], answers: [] },
-            day2: useDay2 ? runAnswersContext.day2 : { questionList: [], answers: [] }
-          };
-        }
-
-        const response = await fetch("/api/analytics/runs", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            reportType: "day1",
-            day1Date: currentSession.id,
-            day2Date: (enabledBlocks.has("day2") || enabledBlocks.has("overall")) ? currentDay2Session?.date : undefined,
-            selectedBlocks: [stepId],
-            customReportName: customReportName,
-            stagePrompts: {
-              [stepId === "infographic-prompt" ? "infographic-prompt" : stepId === "infographic-image" ? "infographic-image" : stepId]: 
-                promptSettings[(stepId === "infographic-prompt" || stepId === "infographic-image" ? "infographic" : stepId) as AnalyticsBlockId]
-            },
-            stageReports: accumulatedReports,
-            assetFiles,
-            customAnswers: customAnswersPayload ?? undefined
-          })
-        });
-
-        if (!response.ok) {
-          const errData = await response.json();
-          throw new Error(errData.message || `Ошибка выполнения этапа ${stepId}`);
-        }
-
-        const runInit = await response.json();
-        const { jobId } = runInit;
-
-        // Poll job status
-        let jobResult = null;
-        while (true) {
-          await new Promise(resolve => setTimeout(resolve, 1500));
-          const checkRes = await fetch(`/api/jobs?id=${jobId}`);
-          if (!checkRes.ok) {
-            throw new Error(`Ошибка опроса статуса задачи ${jobId}`);
-          }
-          const job = await checkRes.json();
-          if (job.status === "succeeded") {
-            jobResult = JSON.parse(job.result);
-            break;
-          } else if (job.status === "failed") {
-            throw new Error(job.message || job.error || "Ошибка фоновой аналитики");
-          }
-          if (job.message) {
-            setRunSteps(prev => prev.map(s => s.id === stepId ? { ...s, description: job.message } : s));
-          }
-        }
-
-        const data = jobResult;
-
-        // Capture context for subsequent requests if not already set
-        if (!runAnswersContext && (data.day1Context || data.day2Context)) {
-          runAnswersContext = {
-            day1Input: data.day1Context?.input || { questionList: [], answers: [] },
-            day1Output: data.day1Context?.output || { questionList: [], answers: [] },
-            day2: data.day2Context || null
-          };
-        }
-
-        if (data.stats) {
-          finalStats = data.stats;
-        }
-
-        const duration = Math.max(1, Math.round((getNow() - currentStepStart) / 1000));
-        stepDurations[stepId] = duration;
-        setExecutionTimes(prev => ({ ...prev, [stepId]: duration }));
-
-        if (data.stageReports) {
-          Object.assign(accumulatedReports, data.stageReports);
-        }
-        if (data.infographicImageUrl) {
-          accumulatedImageUrl = data.infographicImageUrl;
-        }
-
-        setRunResult({
-          status: "ready",
-          message: "Идет обработка шагов...",
-          stageReports: { ...accumulatedReports },
-          infographicImageUrl: accumulatedImageUrl,
-          stats: finalStats || undefined
-        });
-
-        setRunSteps(prev => prev.map(s => s.id === stepId ? { ...s, status: "succeeded" as const } : s));
+      let customAnswersPayload = runAnswersContext;
+      if (runAnswersContext) {
+        customAnswersPayload = {
+          ...runAnswersContext,
+          day1Input: useDay1Input ? runAnswersContext.day1Input : { questionList: [], answers: [] },
+          day1Output: useDay1Output ? runAnswersContext.day1Output : { questionList: [], answers: [] },
+          day2: useDay2 ? runAnswersContext.day2 : { questionList: [], answers: [] }
+        };
       }
 
-      // Merge and set final result
-      const finalReportMarkdown = [
-        accumulatedReports.day1,
-        accumulatedReports.day2,
-        accumulatedReports.overall,
-        accumulatedReports.products,
-        accumulatedReports["infographic-prompt"] ? `# Подготовка промта для инфографики\n\n${accumulatedReports["infographic-prompt"]}` : null,
-        accumulatedReports["infographic-image"] ? `# Инфографика\n\n${accumulatedReports["infographic-image"]}` : null
-      ]
-        .filter(Boolean)
-        .join("\n\n---\n\n");
+      const response = await fetch("/api/analytics/runs", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          reportType: "day1",
+          day1Date: currentSession.id,
+          day2Date: (enabledBlocks.has("day2") || enabledBlocks.has("overall")) ? currentDay2Session?.date : undefined,
+          selectedBlocks: [stepId],
+          customReportName: customReportName,
+          stagePrompts: {
+            [stepId === "infographic-prompt" ? "infographic-prompt" : stepId === "infographic-image" ? "infographic-image" : stepId]: 
+              promptSettings[(stepId === "infographic-prompt" || stepId === "infographic-image" ? "infographic" : stepId) as AnalyticsBlockId]
+          },
+          stageReports: {},
+          assetFiles,
+          customAnswers: customAnswersPayload ?? undefined
+        })
+      });
 
-      const finalResult: AnalyticsRunResult = {
-        status: "ready",
-        message: "Данные обработаны успешно.",
-        reportMarkdown: finalReportMarkdown,
-        infographicImageUrl: accumulatedImageUrl,
-        stageReports: accumulatedReports,
-        stats: finalStats || undefined
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.message || `Ошибка выполнения этапа ${stepId}`);
+      }
+
+      const runInit = await response.json();
+      const { jobId } = runInit;
+
+      const savedRun: SavedAnalyticsRun = {
+        sessionId: currentSession.id,
+        day2SessionId: (enabledBlocks.has("day2") || enabledBlocks.has("overall")) ? currentDay2Session?.date : undefined,
+        stepsToRun,
+        currentStepIndex: 0,
+        currentJobId: jobId,
+        accumulatedReports: {},
+        accumulatedImageUrl: "",
+        customReportName,
+        promptSettings,
+        enabledBlocks: Array.from(enabledBlocks),
+        assetFiles,
+        customAnswers: customAnswersPayload,
+        startTime,
+        stepDurations: {},
+        useDay1Input,
+        useDay1Output,
+        useDay2
       };
 
-      setRunResult(finalResult);
+      localStorage.setItem("active_analytics_run", JSON.stringify(savedRun));
 
-      // Save to localStorage history since the run completed successfully
-      try {
-        const historyStr = localStorage.getItem("analytics_runs_history") || "[]";
-        const history = JSON.parse(historyStr);
-        history.push({
-          timestamp: getNow(),
-          durations: stepDurations
-        });
-        localStorage.setItem("analytics_runs_history", JSON.stringify(history));
-      } catch (err) {
-        console.error("Failed to save run history to localStorage:", err);
-      }
-
-      setActiveRun({
-        id: `analytics-day1-${currentSession.id}`,
-        toolType: "analytics",
-        title: `Аналитика ${formatDate(currentSession.id)}`,
-        status: "succeeded",
-        progress: 100,
-        startedAt: new Date(startTime).toISOString(),
-        steps: initialRunSteps.map(s => ({ id: s.id, title: s.title, description: s.description, status: "succeeded" as const }))
-      });
+      void pollAnalyticsJob(savedRun);
 
     } catch (error) {
       console.error(error);
@@ -710,15 +877,6 @@ export default function AnalyticsView({ promptSettings, activeRun, setActiveRun 
         status: "error",
         message: errorMessage
       });
-
-      setRunSteps(prev => prev.map(s => {
-        if (s.id === currentStepId) return { ...s, status: "failed" as const };
-        return s;
-      }));
-
-      setActiveRun(prev => ({ ...prev, status: "failed", progress: 100 }));
-    } finally {
-      clearInterval(interval);
       setIsRunning(false);
     }
   }

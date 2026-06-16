@@ -27,6 +27,8 @@ export interface RuntimeConfig {
   llmApiKey?: string;
   llmModel?: string;
   geminiApiKey?: string;
+  geminiApiKeyAnalytics?: string;
+  geminiApiKeyProtocols?: string;
   geminiBaseUrl?: string;
   deepgramApiKey?: string;
   deepgramModel?: string;
@@ -39,6 +41,8 @@ export interface RuntimeConfig {
   openNotebookApiUrl: string;
   openNotebookPassword?: string;
   imageModel?: string;
+  geminiModelAnalytics?: string;
+  geminiModelProtocols?: string;
 }
 
 export interface RuntimeConfigStatus {
@@ -58,8 +62,12 @@ export function getRuntimeConfig(env: NodeJS.ProcessEnv = process.env): RuntimeC
   const llmApiKey = [baseLlm, extraLlm].map(k => k.trim()).filter(Boolean).join(",");
 
   const extraGemini = getPrompt("config.extra_gemini_keys", "");
+  const extraGeminiAnalytics = getPrompt("config.extra_gemini_keys_analytics", "");
+  const extraGeminiProtocols = getPrompt("config.extra_gemini_keys_protocols", "");
   const baseGemini = env.GEMINI_API_KEY ?? "";
   const geminiApiKey = [baseGemini, extraGemini].map(k => k.trim()).filter(Boolean).join(",");
+  const geminiApiKeyAnalytics = [baseGemini, extraGeminiAnalytics || extraGemini].map(k => k.trim()).filter(Boolean).join(",");
+  const geminiApiKeyProtocols = [baseGemini, extraGeminiProtocols || extraGemini].map(k => k.trim()).filter(Boolean).join(",");
 
   const extraDeepgram = getPrompt("config.extra_deepgram_keys", "");
   const baseDeepgram = env.DEEPGRAM_API_KEY ?? "";
@@ -67,6 +75,9 @@ export function getRuntimeConfig(env: NodeJS.ProcessEnv = process.env): RuntimeC
 
   const llmModel = getPrompt("config.llm_model", env.LLM_MODEL ?? "qwen3.7-max");
   const deepgramModel = getPrompt("config.deepgram_model", env.DEEPGRAM_MODEL ?? "nova-2");
+
+  const geminiModelAnalytics = getPrompt("config.gemini_model_analytics", "gemini-2.5-flash");
+  const geminiModelProtocols = getPrompt("config.gemini_model_protocols", "gemini-2.5-flash");
 
   const imageServiceApiKey = getPrompt("config.extra_image_service_key", env.IMAGE_SERVICE_API_KEY ?? "") || undefined;
   const imageServiceUrl = getPrompt("config.image_service_url", env.IMAGE_SERVICE_URL ?? "http://automation-codex-service:3007/codex-internal");
@@ -82,6 +93,8 @@ export function getRuntimeConfig(env: NodeJS.ProcessEnv = process.env): RuntimeC
     llmApiKey,
     llmModel,
     geminiApiKey,
+    geminiApiKeyAnalytics,
+    geminiApiKeyProtocols,
     geminiBaseUrl: env.GEMINI_BASE_URL,
     deepgramApiKey,
     deepgramModel,
@@ -93,7 +106,9 @@ export function getRuntimeConfig(env: NodeJS.ProcessEnv = process.env): RuntimeC
     storagePath: env.STORAGE_PATH ?? ".data/storage",
     openNotebookApiUrl: env.OPEN_NOTEBOOK_API_URL ?? "http://127.0.0.1:5055",
     openNotebookPassword: env.OPEN_NOTEBOOK_PASSWORD,
-    imageModel
+    imageModel,
+    geminiModelAnalytics,
+    geminiModelProtocols
   };
 }
 

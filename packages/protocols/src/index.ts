@@ -20,6 +20,7 @@ export interface ProtocolRecord {
   deadlines?: string;
   risks?: string;
   attachments?: string;
+  meetingFormat?: "regular" | "free";
 }
 
 export const protocolFields = [

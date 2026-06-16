@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   ClipboardList,
+  Download,
   LayoutDashboard,
   Moon,
   PanelLeftClose,
@@ -26,7 +27,6 @@ import SettingsView from "./components/SettingsView";
 export default function Home() {
   const [workspace, setWorkspace] = useState<"analytics" | "protocols">("analytics");
   const [section, setSection] = useState<Section>("analytics");
-  const [isRailCollapsed, setIsRailCollapsed] = useState(false);
   const [promptSettings, setPromptSettings] = useState<Record<string, string>>(promptDefaults);
   const [activeAnalyticsRun, setActiveAnalyticsRun] = useState<ProcessRun>(latestAnalyticsRun);
   const [activeProtocolRun, setActiveProtocolRun] = useState<ProcessRun>(latestProtocolRun);
@@ -37,6 +37,34 @@ export default function Home() {
   const [loginUser, setLoginUser] = useState("");
   const [loginPass, setLoginPass] = useState("");
   const [loginError, setLoginError] = useState("");
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+
+  // Register Service Worker and listen to PWA install prompt
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js")
+        .then((reg) => console.log("SW registered:", reg.scope))
+        .catch((err) => console.error("SW registration failed:", err));
+    }
+
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+
+    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    console.log(`User response to PWA install: ${outcome}`);
+    setDeferredPrompt(null);
+  };
 
   // Sync session cookie auth on startup
   useEffect(() => {
@@ -197,16 +225,23 @@ export default function Home() {
   }
 
   return (
-    <div className={cx("app-shell", isRailCollapsed && "rail-collapsed")}>
+    <div className="app-shell rail-collapsed">
       <aside className="left-rail">
+        <div className="sidebar-logo">
+          <img src="/logo.png" alt="Логотип РСК" />
+        </div>
+
         {/* Brand Area Switcher Workspace */}
         <div className="brand" onClick={toggleWorkspace} style={{ cursor: "pointer" }} title="Нажмите для переключения воркспейса">
-          <img src="/logo.png" style={{ height: "24px", maxWidth: "100%", objectFit: "contain" }} alt="Логотип РСК" />
+          {workspace === "analytics" ? (
+            <LayoutDashboard size={18} style={{ color: "#38bdf8", flexShrink: 0 }} />
+          ) : (
+            <ClipboardList size={18} style={{ color: "#38bdf8", flexShrink: 0 }} />
+          )}
           <div className="brand-copy">
             <strong>{workspace === "analytics" ? "Аналитика" : "Протоколы"}</strong>
             <span>платформа инструментов</span>
           </div>
-          <ChevronDown size={14} style={{ marginLeft: "auto", opacity: 0.7 }} />
         </div>
 
         <nav>
@@ -238,16 +273,6 @@ export default function Home() {
             <span>Настройки</span>
           </button>
         </nav>
-
-        {/* Collapse rail toggle */}
-        <button
-          className="rail-toggle"
-          style={{ marginTop: "auto" }}
-          aria-label={isRailCollapsed ? "Показать боковую панель" : "Скрыть боковую панель"}
-          onClick={() => setIsRailCollapsed((collapsed) => !collapsed)}
-        >
-          {isRailCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
-        </button>
       </aside>
 
       <div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100vh", overflow: "hidden" }}>

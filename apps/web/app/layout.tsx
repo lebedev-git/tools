@@ -3,7 +3,8 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Tools Platform",
-  description: "Analytics and protocol tools platform"
+  description: "Analytics and protocol tools platform",
+  manifest: "/manifest.json"
 };
 
 interface RootLayoutProps {

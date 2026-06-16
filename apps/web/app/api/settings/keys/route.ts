@@ -1,4 +1,5 @@
 import { getPrompt, setPrompt } from "@tools/db";
+import { getRuntimeConfig } from "@tools/integrations";
 import { join, dirname } from "node:path";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
@@ -67,11 +68,15 @@ export async function GET() {
       extraLlmKeys: splitKeys(getPrompt("config.extra_llm_keys", "")),
       llmModel: getPrompt("config.llm_model", ""),
       extraGeminiKeys: splitKeys(getPrompt("config.extra_gemini_keys", "")),
+      extraGeminiKeysAnalytics: splitKeys(getPrompt("config.extra_gemini_keys_analytics", "")),
+      extraGeminiKeysProtocols: splitKeys(getPrompt("config.extra_gemini_keys_protocols", "")),
       extraDeepgramKeys: splitKeys(getPrompt("config.extra_deepgram_keys", "")),
       deepgramModel: getPrompt("config.deepgram_model", ""),
       extraImageServiceKey: getPrompt("config.extra_image_service_key", ""),
       imageServiceUrl: getPrompt("config.image_service_url", ""),
-      imageModel: getPrompt("config.image_model", "")
+      imageModel: getPrompt("config.image_model", ""),
+      geminiModelAnalytics: getPrompt("config.gemini_model_analytics", "gemini-2.5-flash"),
+      geminiModelProtocols: getPrompt("config.gemini_model_protocols", "gemini-2.5-flash")
     };
 
     // Load GPT Accounts for infographic
@@ -107,14 +112,19 @@ export async function GET() {
 export async function PUT(request: Request) {
   try {
     const payload = (await request.json()) as {
+      action?: string;
       extraLlmKeys?: string[];
       llmModel?: string;
       extraGeminiKeys?: string[];
+      extraGeminiKeysAnalytics?: string[];
+      extraGeminiKeysProtocols?: string[];
       extraDeepgramKeys?: string[];
       deepgramModel?: string;
       extraImageServiceKey?: string;
       imageServiceUrl?: string;
       imageModel?: string;
+      geminiModelAnalytics?: string;
+      geminiModelProtocols?: string;
       accounts?: Array<{
         email: string;
         access_token: string;
@@ -122,6 +132,62 @@ export async function PUT(request: Request) {
         quota?: number;
       }>;
     };
+
+    if (payload.action === "refresh_limits") {
+      const config = getRuntimeConfig();
+      const serviceUrl = config.imageServiceUrl || "http://image-service:80/v1";
+      const serviceApiKey = config.imageServiceApiKey || "chatgpt2api";
+
+      let baseUrl = serviceUrl.trim();
+      if (baseUrl.endsWith("/v1")) {
+        baseUrl = baseUrl.slice(0, -3);
+      } else if (baseUrl.endsWith("/codex-internal")) {
+        baseUrl = baseUrl.slice(0, -15);
+      }
+
+      try {
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json"
+        };
+        if (serviceApiKey) {
+          headers["Authorization"] = `Bearer ${serviceApiKey}`;
+        }
+        
+        console.log(`[Settings API] Triggering accounts refresh: ${baseUrl}/api/accounts/refresh`);
+        const refreshRes = await fetch(`${baseUrl}/api/accounts/refresh`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({})
+        });
+        console.log(`[Settings API] Accounts refresh status: ${refreshRes.status}`);
+
+        // Wait 1.5 seconds for the background update to complete
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      } catch (err: any) {
+        console.warn("[Settings API] Failed to trigger accounts refresh in image-service:", err.message);
+      }
+
+      const rawAccounts = readExistingAccounts();
+      const accounts = rawAccounts.map((acc: any) => {
+        const imageGenLimit = Array.isArray(acc.limits_progress)
+          ? acc.limits_progress.find((l: any) => l.feature_name === "image_gen")
+          : null;
+
+        const remaining = imageGenLimit ? imageGenLimit.remaining : (acc.quota ?? 3);
+        const maxQuota = Math.max(acc.quota ?? 3, remaining);
+
+        return {
+          email: acc.email,
+          status: acc.status || "正常",
+          quota: maxQuota,
+          remaining: remaining,
+          access_token: maskSingleKey(acc.access_token),
+          created_at: acc.created_at
+        };
+      });
+
+      return Response.json({ status: "refreshed", accounts });
+    }
 
     if (payload.extraLlmKeys !== undefined) {
       setPrompt("config.extra_llm_keys", payload.extraLlmKeys.join(","));
@@ -131,6 +197,12 @@ export async function PUT(request: Request) {
     }
     if (payload.extraGeminiKeys !== undefined) {
       setPrompt("config.extra_gemini_keys", payload.extraGeminiKeys.join(","));
+    }
+    if (payload.extraGeminiKeysAnalytics !== undefined) {
+      setPrompt("config.extra_gemini_keys_analytics", payload.extraGeminiKeysAnalytics.join(","));
+    }
+    if (payload.extraGeminiKeysProtocols !== undefined) {
+      setPrompt("config.extra_gemini_keys_protocols", payload.extraGeminiKeysProtocols.join(","));
     }
     if (payload.extraDeepgramKeys !== undefined) {
       setPrompt("config.extra_deepgram_keys", payload.extraDeepgramKeys.join(","));
@@ -146,6 +218,12 @@ export async function PUT(request: Request) {
     }
     if (payload.imageModel !== undefined) {
       setPrompt("config.image_model", payload.imageModel);
+    }
+    if (payload.geminiModelAnalytics !== undefined) {
+      setPrompt("config.gemini_model_analytics", payload.geminiModelAnalytics);
+    }
+    if (payload.geminiModelProtocols !== undefined) {
+      setPrompt("config.gemini_model_protocols", payload.geminiModelProtocols);
     }
 
     // Handle GPT Accounts

@@ -1,7 +1,10 @@
 import { getRuntimeConfig, type RuntimeConfig } from "./runtimeConfig";
 
 export class GeminiClient {
-  public constructor(private readonly config: RuntimeConfig = getRuntimeConfig()) {}
+  public constructor(
+    private readonly config: RuntimeConfig = getRuntimeConfig(),
+    private readonly workspace: "analytics" | "protocols" = "protocols"
+  ) {}
 
   private getBaseUrl(): string {
     const raw = this.config.geminiBaseUrl;
@@ -14,13 +17,15 @@ export class GeminiClient {
   private currentKeyIndex = 0;
 
   private getApiKeys(): string[] {
-    const rawKeys = this.config.geminiApiKey;
+    const rawKeys = this.workspace === "analytics"
+      ? (this.config.geminiApiKeyAnalytics || this.config.geminiApiKey)
+      : (this.config.geminiApiKeyProtocols || this.config.geminiApiKey);
     if (!rawKeys) {
-      throw new Error("GEMINI_API_KEY is not configured in environment variables.");
+      throw new Error(`GEMINI_API_KEY is not configured for workspace ${this.workspace}.`);
     }
     const keys = rawKeys.split(",").map((k) => k.trim()).filter(Boolean);
     if (keys.length === 0) {
-      throw new Error("No valid keys found in GEMINI_API_KEY.");
+      throw new Error(`No valid keys found for workspace ${this.workspace}.`);
     }
     return keys;
   }
@@ -40,12 +45,16 @@ export class GeminiClient {
     operation: (apiKey: string, modelName: string) => Promise<T>,
     retries = 4,
     delay = 2000,
-    modelName = "gemini-2.5-flash"
+    modelName?: string
   ): Promise<T> {
+    const activeModel = modelName ?? (this.workspace === "analytics"
+      ? (this.config.geminiModelAnalytics ?? "gemini-2.5-flash")
+      : (this.config.geminiModelProtocols ?? "gemini-2.5-flash"));
+
     const keys = this.getApiKeys();
     const apiKey = this.getApiKey(keys);
     try {
-      return await operation(apiKey, modelName);
+      return await operation(apiKey, activeModel);
     } catch (error: any) {
       const is503 = error.message?.includes("status 503") || error.message?.includes("Service Unavailable") || error.message?.includes("temporary");
       const is429 = error.message?.includes("status 429") || error.message?.includes("Quota exceeded");
@@ -59,9 +68,9 @@ export class GeminiClient {
           this.rotateKey(keys);
         }
         
-        let nextModel = modelName;
-        if ((is503 || is429) && modelName === "gemini-2.5-flash") {
-          console.warn(`Gemini model ${modelName} overloaded or rate-limited. Falling back to gemini-2.0-flash.`);
+        let nextModel = activeModel;
+        if ((is503 || is429) && activeModel === "gemini-2.5-flash") {
+          console.warn(`Gemini model ${activeModel} overloaded or rate-limited. Falling back to gemini-2.0-flash.`);
           nextModel = "gemini-2.0-flash";
         }
 
@@ -398,7 +407,6 @@ ${prompt}`;
 
         const data = await response.json();
         const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-
         if (typeof text !== "string") {
           throw new Error("Gemini returned an empty or unexpected response for visual prompt generation.");
         }
@@ -413,5 +421,85 @@ ${prompt}`;
         clearTimeout(timeoutId);
       }
     });
+  }
+
+  public async createChatCompletion(options: {
+    messages: Array<{ role: string; content: string | any[] }>;
+    temperature?: number;
+    maxTokens?: number;
+  }): Promise<string> {
+    return this.executeWithRetry(async (apiKey, modelName) => {
+      const url = `${this.getBaseUrl()}/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 180000);
+
+      // Convert OpenAI messages to Gemini contents structure
+      const systemMessage = options.messages.find((m) => m.role === "system");
+      const userMessages = options.messages.filter((m) => m.role !== "system");
+
+      const contents = userMessages.map((m) => {
+        const parts = Array.isArray(m.content)
+          ? m.content.map((p) => {
+              if (p.type === "text") return { text: p.text };
+              if (p.type === "image_url") {
+                const urlStr = p.image_url.url;
+                const match = urlStr.match(/^data:(.*);base64,(.*)$/);
+                if (match) {
+                  return { inlineData: { mimeType: match[1], data: match[2] } };
+                }
+              }
+              return { text: "" };
+            })
+          : [{ text: String(m.content) }];
+        return {
+          role: m.role === "assistant" ? "model" : "user",
+          parts
+        };
+      });
+
+      const body: any = {
+        contents,
+        generationConfig: {
+          temperature: options.temperature ?? 0.4,
+          maxOutputTokens: options.maxTokens ?? 4096
+        }
+      };
+
+      if (systemMessage) {
+        body.systemInstruction = {
+          parts: [{ text: String(systemMessage.content) }]
+        };
+      }
+
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          signal: controller.signal
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Gemini generateContent API returned status ${response.status}: ${errText}`);
+        }
+
+        const data = await response.json();
+        const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+        if (typeof rawText !== "string") {
+          throw new Error("Gemini returned an empty or unexpected response for generateContent.");
+        }
+
+        return rawText.trim();
+      } catch (error: any) {
+        if (error.name === "AbortError") {
+          throw new Error("Gemini request timed out after 3 minutes.");
+        }
+        throw error;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    }, 4, 2000);
   }
 }

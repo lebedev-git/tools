@@ -49,7 +49,71 @@ export default function ProtocolsView({
   const [protocolExecutionTimes, setProtocolExecutionTimes] = useState<Record<string, number>>({});
   const protocolStageRef = useRef("");
 
-  const dbParticipants = useMemo(() => ["Антон А.", "Андрей Л.", "Колесникова С."], []);
+  const dbParticipants = useMemo(() => ["Антон Актуганов", "Андрей Лебедев", "Софья Колесникова"], []);
+
+  const [regularContexts, setRegularContexts] = useState<Record<string, string>>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("protocol_regular_contexts");
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch (e) {}
+      }
+    }
+    return {
+      "Антон Актуганов": "Руководитель проекта",
+      "Андрей Лебедев": "Ведущий архитектор",
+      "Софья Колесникова": "Аналитик"
+    };
+  });
+
+  const handleContextChange = (name: string, value: string) => {
+    const next = { ...regularContexts, [name]: value };
+    setRegularContexts(next);
+    localStorage.setItem("protocol_regular_contexts", JSON.stringify(next));
+  };
+
+  const [customRoles, setCustomRoles] = useState<Record<string, string>>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("protocol_custom_roles");
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch (e) {}
+      }
+    }
+    return {};
+  });
+
+  const handleCustomRoleChange = (name: string, role: string) => {
+    const next = { ...customRoles, [name]: role };
+    setCustomRoles(next);
+    localStorage.setItem("protocol_custom_roles", JSON.stringify(next));
+  };
+
+  const changeMeetingFormat = (format: "regular" | "free") => {
+    setMeetingFormat(format);
+    if (protocol) {
+      const currentParts = protocol.participants || [];
+      let nextParts = [...currentParts];
+      if (format === "regular") {
+        const missing = dbParticipants.filter(p => !currentParts.includes(p));
+        nextParts = [...currentParts, ...missing];
+      }
+      const updated = protocols.map((item) => {
+        if (item.id === selectedProtocolId) {
+          return {
+            ...item,
+            meetingFormat: format,
+            participants: nextParts
+          };
+        }
+        return item;
+      });
+      setProtocols(updated);
+      void saveProtocols(updated);
+    }
+  };
 
   const [chunksCount, setChunksCount] = useState<number | null>(null);
   const [mediaDuration, setMediaDuration] = useState<number | null>(null);
@@ -71,7 +135,7 @@ export default function ProtocolsView({
             title: "Новый протокол встречи",
             date: new Date().toISOString().substring(0, 10),
             status: "draft" as const,
-            participants: ["Антон А.", "Андрей Л.", "Колесникова С."],
+            participants: ["Антон Актуганов", "Андрей Лебедев", "Софья Колесникова"],
             actionItems: 0,
             decisions: 0,
             transcript: "",
@@ -171,11 +235,15 @@ export default function ProtocolsView({
 
   useEffect(() => {
     if (protocol) {
-      const parts = protocol.participants || [];
-      const containsAll = dbParticipants.every(p => parts.includes(p));
-      setMeetingFormat(containsAll ? "regular" : "free");
+      if (protocol.meetingFormat) {
+        setMeetingFormat(protocol.meetingFormat);
+      } else {
+        const parts = protocol.participants || [];
+        const containsAll = dbParticipants.every(p => parts.includes(p));
+        setMeetingFormat(containsAll ? "regular" : "free");
+      }
     }
-  }, [selectedProtocolId, protocol, dbParticipants]);
+  }, [selectedProtocolId]);
 
   const handleReset = () => {
     setSelectedFile(null);
@@ -404,6 +472,202 @@ export default function ProtocolsView({
     void saveProtocols(updated);
   };
 
+  const cleanupLocalStorage = (targetProtocolId: string) => {
+    localStorage.removeItem(`active_protocol_job_id_${targetProtocolId}`);
+    localStorage.removeItem(`active_protocol_start_time_${targetProtocolId}`);
+    localStorage.removeItem(`active_protocol_has_file_${targetProtocolId}`);
+  };
+
+  const pollProtocolJob = async (jobId: number, targetProtocolId: string) => {
+    const savedStart = localStorage.getItem(`active_protocol_start_time_${targetProtocolId}`);
+    const startTime = savedStart ? parseInt(savedStart, 10) : Date.now();
+    const hasFile = localStorage.getItem(`active_protocol_has_file_${targetProtocolId}`) === "true";
+
+    setIsGenerating(true);
+    setHasRunStarted(true);
+    setError(null);
+
+    const timerInterval = setInterval(() => {
+      const now = Date.now();
+      const secs = Math.max(1, Math.round((now - startTime) / 1000));
+      setProtocolTotalTime(secs);
+
+      setProtocolExecutionTimes((prev) => {
+        let activeStep = "";
+        const stage = protocolStageRef.current;
+        if (!stage) {
+          activeStep = hasFile ? "source" : "extract";
+        } else if (stage === "upload" || stage === "convert" || stage === "google_upload") {
+          activeStep = "source";
+        } else if (stage === "transcribe") {
+          activeStep = "transcribe";
+        } else if (stage === "extract" || stage === "save") {
+          activeStep = "extract";
+        }
+        
+        if (activeStep) {
+          return {
+            ...prev,
+            [activeStep]: (prev[activeStep] || 0) + 1
+          };
+        }
+        return prev;
+      });
+    }, 1000);
+
+    try {
+      let isDone = false;
+      let lastTranscript = "";
+      while (!isDone) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        const checkRes = await fetch(`/api/jobs?id=${jobId}`);
+        if (!checkRes.ok) {
+          throw new Error(`Ошибка опроса статуса задачи ${jobId}`);
+        }
+        const job = await checkRes.json();
+
+        if (job.status === "failed") {
+          throw new Error(job.message || job.error || "Ошибка генерации протокола.");
+        }
+
+        if (job.message) {
+          setProgressMessage(job.message);
+        }
+        if (typeof job.progress === "number") {
+          setUploadProgress(job.progress);
+        }
+
+        let stage = "queued";
+        if (job.progress >= 85) stage = "extract";
+        else if (job.progress >= 80) stage = "transcribe";
+        else if (job.progress >= 50) stage = "google_upload";
+        else if (job.progress >= 15) stage = "convert";
+        else if (job.progress >= 10) stage = "upload";
+
+        setCurrentStage(stage);
+        protocolStageRef.current = stage;
+
+        if (job.result) {
+          try {
+            const resData = JSON.parse(job.result);
+            const currentTranscript = resData.currentTranscript || resData.finalTranscript;
+            if (currentTranscript && currentTranscript !== lastTranscript) {
+              lastTranscript = currentTranscript;
+              setProtocols((prevProtocols) => prevProtocols.map((item) => {
+                if (item.id === targetProtocolId) {
+                  return { ...item, transcript: currentTranscript };
+                }
+                return item;
+              }));
+            }
+          } catch {}
+        }
+
+        setRunSteps((prevSteps) => {
+          const steps = prevSteps.length > 0 ? prevSteps : [
+            { id: "source", title: "Подготовка файла", description: hasFile ? "Обработка файла..." : "Использована готовая стенограмма", status: hasFile ? "pending" as const : "succeeded" as const },
+            { id: "transcribe", title: "Подготовка стенограммы", description: hasFile ? "Ожидание распознавания речи..." : "Стенограмма взята из черновика", status: hasFile ? "pending" as const : "succeeded" as const },
+            { id: "extract", title: "Подготовка протокола", description: "Ожидание выделения структуры...", status: "pending" as const },
+            { id: "publish", title: "Публикация в Open Notebook", description: "Ожидание завершения генерации...", status: "pending" as const }
+          ];
+
+          return steps.map((step) => {
+            if (stage === "upload" || stage === "convert" || stage === "google_upload") {
+              if (step.id === "source") return { ...step, status: "running" as const, description: job.message || "Обработка и загрузка файла..." };
+            }
+            if (stage === "transcribe") {
+              if (step.id === "source") return { ...step, status: "succeeded" as const, description: "Файл успешно подготовлен и загружен в Google Cloud" };
+              if (step.id === "transcribe") return { ...step, status: "running" as const, description: job.message || "Распознавание речи..." };
+            }
+            if (stage === "extract" || stage === "save" || job.status === "succeeded") {
+              if (step.id === "source") return { ...step, status: "succeeded" as const, description: "Файл успешно подготовлен и загружен в Google Cloud" };
+              if (step.id === "transcribe") return { ...step, status: "succeeded" as const, description: "Стенограмма встречи готова" };
+              if (step.id === "extract") {
+                if (job.status === "succeeded") return { ...step, status: "succeeded" as const, description: "Протокол встречи подготовлен" };
+                return { ...step, status: "running" as const, description: job.message || "Извлечение структуры протокола..." };
+              }
+            }
+            return step;
+          });
+        });
+
+        if (job.status === "succeeded") {
+          const resData = JSON.parse(job.result);
+          const ext = resData.extractedData;
+          const finalTranscript = resData.finalTranscript || "";
+
+          const decisionsCount = ext.decisionsText
+            ? ext.decisionsText.split("\n").map((l: string) => l.trim()).filter((l: string) => l.length > 0 && (l.startsWith("-") || l.startsWith("*") || /^\d+\./.test(l))).length
+            : 0;
+          const tasksCount = ext.tasksText
+            ? ext.tasksText.split("\n").map((l: string) => l.trim()).filter((l: string) => l.length > 0 && (l.startsWith("-") || l.startsWith("*") || /^\d+\./.test(l))).length
+            : 0;
+
+          setProtocols((currentProtocols) => {
+            const updated = currentProtocols.map((item) => {
+              if (item.id === targetProtocolId) {
+                return {
+                  ...item,
+                  transcript: finalTranscript,
+                  theme: ext.theme || "",
+                  agenda: ext.agenda || "",
+                  keyPoints: ext.keyPoints || "",
+                  decisionsText: ext.decisionsText || "",
+                  tasksText: ext.tasksText || "",
+                  responsible: ext.responsible || "",
+                  deadlines: ext.deadlines || "",
+                  risks: ext.risks || "",
+                  attachments: ext.attachments || "",
+                  decisions: decisionsCount,
+                  actionItems: tasksCount,
+                  status: "review" as const
+                };
+              }
+              return item;
+            });
+            void saveProtocols(updated);
+            return updated;
+          });
+
+          setRunSteps([
+            { id: "source", title: "Подготовка файла", description: "Файл успешно подготовлен и загружен в Google Cloud", status: "succeeded" },
+            { id: "transcribe", title: "Подготовка стенограммы", description: "Стенограмма успешно подготовлена", status: "succeeded" },
+            { id: "extract", title: "Подготовка протокола", description: "Протокол встречи подготовлен", status: "succeeded" },
+            { id: "publish", title: "Публикация в Open Notebook", description: "Ожидает публикации", status: "pending" }
+          ]);
+
+          setSelectedFile(null);
+          isDone = true;
+          cleanupLocalStorage(targetProtocolId);
+        }
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Не удалось сгенерировать протокол.";
+      setError(errorMessage);
+      setProgressMessage("Ошибка генерации");
+      setRunSteps((prevSteps) => prevSteps.map((s) => s.status === "running" ? { ...s, status: "failed" as const, description: "Сбой операции" } : s));
+      cleanupLocalStorage(targetProtocolId);
+    } finally {
+      clearInterval(timerInterval);
+      setIsGenerating(false);
+      setUploadProgress(null);
+      setCurrentStage("");
+      protocolStageRef.current = "";
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && protocol) {
+      const activeJobIdStr = localStorage.getItem(`active_protocol_job_id_${protocol.id}`);
+      if (activeJobIdStr) {
+        const jobId = parseInt(activeJobIdStr, 10);
+        if (!isNaN(jobId) && !isGenerating) {
+          void pollProtocolJob(jobId, protocol.id);
+        }
+      }
+    }
+  }, [selectedProtocolId, protocol]);
+
   const handleRegenerate = async () => {
     if (!protocol) return;
 
@@ -429,35 +693,6 @@ export default function ProtocolsView({
     setProtocolTotalTime(0);
     setProtocolExecutionTimes({});
     protocolStageRef.current = "";
-
-    const startTime = Date.now();
-    const timerInterval = setInterval(() => {
-      const now = Date.now();
-      const secs = Math.max(1, Math.round((now - startTime) / 1000));
-      setProtocolTotalTime(secs);
-
-      setProtocolExecutionTimes((prev) => {
-        let activeStep = "";
-        const stage = protocolStageRef.current;
-        if (!stage) {
-          activeStep = selectedFile ? "source" : "extract";
-        } else if (stage === "upload" || stage === "convert" || stage === "google_upload") {
-          activeStep = "source";
-        } else if (stage === "transcribe") {
-          activeStep = "transcribe";
-        } else if (stage === "extract" || stage === "save") {
-          activeStep = "extract";
-        }
-        
-        if (activeStep) {
-          return {
-            ...prev,
-            [activeStep]: (prev[activeStep] || 0) + 1
-          };
-        }
-        return prev;
-      });
-    }, 1000);
 
     if (selectedFile) {
       setProgressMessage("Подготовка файла...");
@@ -492,17 +727,29 @@ export default function ProtocolsView({
     });
 
     try {
-      const promptText = promptSettings["protocol.meeting"] || "";
+      const promptKey = meetingFormat === "regular" ? "protocol.regular.meeting" : "protocol.meeting";
+      const promptText = promptSettings[promptKey] || "";
       const transcriptPromptText = promptSettings["protocol.transcript"] || "";
       
       const dateInfo = protocol.date 
         ? `\nДата встречи: ${protocol.date}.` 
         : "";
-      const participantsInfo = protocol.participants && protocol.participants.length > 0
-        ? `\nПрисутствовали на встрече: ${protocol.participants.join(", ")}.`
-        : "";
       
-      const metadataAddon = `\n\n[Метаданные встречи для включения в протокол]:${dateInfo}${participantsInfo}\nОбязательно укажи эту дату и точный состав участников в начале сгенерированного протокола.`;
+      let participantsInfo = "";
+      if (protocol.participants && protocol.participants.length > 0) {
+        const partsWithContext = protocol.participants.map(p => {
+          let context = "";
+          if (meetingFormat === "regular") {
+            context = regularContexts[p] || customRoles[p] || "";
+          } else {
+            context = customRoles[p] || "";
+          }
+          return context ? `${p} (${context})` : p;
+        });
+        participantsInfo = `\nПрисутствовали на встрече: ${partsWithContext.join(", ")}.`;
+      }
+      
+      const metadataAddon = `\n\n[Метаданные встречи для включения в протокол]:${dateInfo}${participantsInfo}\nОбязательно укажи эту дату и точный состав участников в начале сгенерированного протокола. Также учти контекст/роль каждого участника при распределении задач и описании тезисов.`;
         
       const fullPromptText = promptText + metadataAddon;
       const fullTranscriptPromptText = transcriptPromptText + (protocol.participants && protocol.participants.length > 0 
@@ -541,135 +788,17 @@ export default function ProtocolsView({
       const runInit = await response.json();
       const { jobId } = runInit;
 
-      // Poll job status
-      let isDone = false;
-      let lastTranscript = "";
-      while (!isDone) {
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-        const checkRes = await fetch(`/api/jobs?id=${jobId}`);
-        if (!checkRes.ok) {
-          throw new Error(`Ошибка опроса статуса задачи ${jobId}`);
-        }
-        const job = await checkRes.json();
+      localStorage.setItem(`active_protocol_job_id_${protocol.id}`, String(jobId));
+      localStorage.setItem(`active_protocol_start_time_${protocol.id}`, String(Date.now()));
+      localStorage.setItem(`active_protocol_has_file_${protocol.id}`, selectedFile ? "true" : "false");
 
-        if (job.status === "failed") {
-          throw new Error(job.message || job.error || "Ошибка генерации протокола.");
-        }
+      void pollProtocolJob(jobId, protocol.id);
 
-        if (job.message) {
-          setProgressMessage(job.message);
-        }
-        if (typeof job.progress === "number") {
-          setUploadProgress(job.progress);
-        }
-
-        // Determine current stage based on progress
-        let stage = "queued";
-        if (job.progress >= 85) stage = "extract";
-        else if (job.progress >= 80) stage = "transcribe";
-        else if (job.progress >= 50) stage = "google_upload";
-        else if (job.progress >= 15) stage = "convert";
-        else if (job.progress >= 10) stage = "upload";
-
-        setCurrentStage(stage);
-        protocolStageRef.current = stage;
-
-        if (job.result) {
-          try {
-            const resData = JSON.parse(job.result);
-            const currentTranscript = resData.currentTranscript || resData.finalTranscript;
-            if (currentTranscript && currentTranscript !== lastTranscript) {
-              lastTranscript = currentTranscript;
-              setProtocols((prevProtocols) => prevProtocols.map((item) => {
-                if (item.id === protocol.id) {
-                  return { ...item, transcript: currentTranscript };
-                }
-                return item;
-              }));
-            }
-          } catch {}
-        }
-
-        setRunSteps((prevSteps) => {
-          return prevSteps.map((step) => {
-            if (stage === "upload" || stage === "convert" || stage === "google_upload") {
-              if (step.id === "source") return { ...step, status: "running" as const, description: job.message || "Обработка и загрузка файла..." };
-            }
-            if (stage === "transcribe") {
-              if (step.id === "source") return { ...step, status: "succeeded" as const, description: "Файл успешно подготовлен и загружен в Google Cloud" };
-              if (step.id === "transcribe") return { ...step, status: "running" as const, description: job.message || "Распознавание речи..." };
-            }
-            if (stage === "extract" || stage === "save" || job.status === "succeeded") {
-              if (step.id === "source") return { ...step, status: "succeeded" as const, description: "Файл успешно подготовлен и загружен в Google Cloud" };
-              if (step.id === "transcribe") return { ...step, status: "succeeded" as const, description: "Стенограмма встречи готова" };
-              if (step.id === "extract") {
-                if (job.status === "succeeded") return { ...step, status: "succeeded" as const, description: "Протокол встречи подготовлен" };
-                return { ...step, status: "running" as const, description: job.message || "Извлечение структуры протокола..." };
-              }
-            }
-            return step;
-          });
-        });
-
-        if (job.status === "succeeded") {
-          const resData = JSON.parse(job.result);
-          const ext = resData.extractedData;
-          const finalTranscript = resData.finalTranscript || "";
-
-          const decisionsCount = ext.decisionsText
-            ? ext.decisionsText.split("\n").map((l: string) => l.trim()).filter((l: string) => l.length > 0 && (l.startsWith("-") || l.startsWith("*") || /^\d+\./.test(l))).length
-            : 0;
-          const tasksCount = ext.tasksText
-            ? ext.tasksText.split("\n").map((l: string) => l.trim()).filter((l: string) => l.length > 0 && (l.startsWith("-") || l.startsWith("*") || /^\d+\./.test(l))).length
-            : 0;
-
-          const updated = protocols.map((item) => {
-            if (item.id === selectedProtocolId) {
-              return {
-                ...item,
-                transcript: finalTranscript,
-                theme: ext.theme || "",
-                agenda: ext.agenda || "",
-                keyPoints: ext.keyPoints || "",
-                decisionsText: ext.decisionsText || "",
-                tasksText: ext.tasksText || "",
-                responsible: ext.responsible || "",
-                deadlines: ext.deadlines || "",
-                risks: ext.risks || "",
-                attachments: ext.attachments || "",
-                decisions: decisionsCount,
-                actionItems: tasksCount,
-                status: "review" as const
-              };
-            }
-            return item;
-          });
-
-          setProtocols(updated);
-          await saveProtocols(updated);
-
-          setRunSteps([
-            { id: "source", title: "Подготовка файла", description: "Файл успешно подготовлен и загружен в Google Cloud", status: "succeeded" },
-            { id: "transcribe", title: "Подготовка стенограммы", description: "Стенограмма успешно подготовлена", status: "succeeded" },
-            { id: "extract", title: "Подготовка протокола", description: "Протокол встречи подготовлен", status: "succeeded" },
-            { id: "publish", title: "Публикация в Open Notebook", description: "Ожидает публикации", status: "pending" }
-          ]);
-
-          setSelectedFile(null);
-          isDone = true;
-        }
-      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Не удалось сгенерировать протокол.";
       setError(errorMessage);
       setProgressMessage("Ошибка генерации");
-      setRunSteps((prevSteps) => prevSteps.map((s) => s.status === "running" ? { ...s, status: "failed" as const, description: "Сбой операции" } : s));
-    } finally {
       setIsGenerating(false);
-      setUploadProgress(null);
-      setCurrentStage("");
-      clearInterval(timerInterval);
-      protocolStageRef.current = "";
     }
   };
 
@@ -943,146 +1072,365 @@ export default function ProtocolsView({
                   <span style={{ fontSize: "13.5px", fontWeight: 700, color: "var(--text, #0f172a)", display: "flex", alignItems: "center", gap: "6px" }}>
                     👤 Участники встречи
                   </span>
+
+                  {/* Вкладки формата встреч */}
+                  <div style={{ display: "flex", borderBottom: "1px solid var(--line)", paddingBottom: "8px", marginBottom: "4px" }}>
+                    <button
+                      type="button"
+                      onClick={() => changeMeetingFormat("regular")}
+                      style={{
+                        padding: "6px 12px",
+                        fontSize: "13px",
+                        fontWeight: 600,
+                        color: meetingFormat === "regular" ? "var(--accent)" : "var(--muted)",
+                        borderBottom: meetingFormat === "regular" ? "2px solid var(--accent)" : "none",
+                        background: "none",
+                        cursor: "pointer"
+                      }}
+                    >
+                      Регулярная встреча
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => changeMeetingFormat("free")}
+                      style={{
+                        padding: "6px 12px",
+                        fontSize: "13px",
+                        fontWeight: 600,
+                        color: meetingFormat === "free" ? "var(--accent)" : "var(--muted)",
+                        borderBottom: meetingFormat === "free" ? "2px solid var(--accent)" : "none",
+                        background: "none",
+                        cursor: "pointer"
+                      }}
+                    >
+                      Обычная встреча
+                    </button>
+                  </div>
                   
-                  {/* Быстрый кликабельный выбор регулярных участников */}
-                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                    <span style={{ fontSize: "11px", color: "var(--muted, #64748b)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Быстрый выбор (Регулярные):</span>
-                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                      {dbParticipants.map((p) => {
-                        const isSelected = (protocol?.participants || []).includes(p);
-                        return (
-                          <button
-                            key={p}
-                            type="button"
-                            onClick={() => {
-                              if (isSelected) {
-                                const next = (protocol?.participants || []).filter(item => item !== p);
-                                handleFieldChange("participants", next.join(", "));
-                              } else {
-                                const next = [...(protocol?.participants || []), p];
-                                handleFieldChange("participants", next.join(", "));
+                  {meetingFormat === "regular" ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                      <span style={{ fontSize: "11px", color: "var(--muted, #64748b)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                        Участники регулярной встречи и их контекст/роль:
+                      </span>
+                      
+                      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                        {dbParticipants.map((p) => {
+                          const isSelected = (protocol?.participants || []).includes(p);
+                          return (
+                            <div key={p} style={{ display: "grid", gridTemplateColumns: "160px 1fr", alignItems: "center", gap: "12px", padding: "8px", background: isSelected ? "#e6f4ea" : "#ffffff", border: "1px solid var(--line)", borderRadius: "8px" }}>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (isSelected) {
+                                    const next = (protocol?.participants || []).filter(item => item !== p);
+                                    handleFieldChange("participants", next.join(", "));
+                                  } else {
+                                    const next = [...(protocol?.participants || []), p];
+                                    handleFieldChange("participants", next.join(", "));
+                                  }
+                                }}
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "6px",
+                                  padding: "6px 12px",
+                                  borderRadius: "99px",
+                                  border: isSelected ? "1.5px solid #10b981" : "1.5px solid var(--line, #cbd5e1)",
+                                  background: isSelected ? "#ffffff" : "#f1f5f9",
+                                  color: isSelected ? "#137333" : "var(--text, #334155)",
+                                  cursor: "pointer",
+                                  fontSize: "12px",
+                                  fontWeight: 600,
+                                  textAlign: "left"
+                                }}
+                              >
+                                <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: isSelected ? "#10b981" : "#94a3b8" }} />
+                                {p}
+                              </button>
+                              
+                              <input
+                                type="text"
+                                value={regularContexts[p] || ""}
+                                onChange={(e) => handleContextChange(p, e.target.value)}
+                                placeholder="Роль (например: Ведущий, Разработчик)"
+                                disabled={!isSelected}
+                                style={{
+                                  padding: "6px 10px",
+                                  fontSize: "12.5px",
+                                  border: "1px solid var(--line, #cbd5e1)",
+                                  borderRadius: "6px",
+                                  background: isSelected ? "#ffffff" : "#f8fafc",
+                                  color: isSelected ? "var(--text)" : "var(--muted)",
+                                  opacity: isSelected ? 1 : 0.6
+                                }}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                      
+                      {/* Возможность добавить другого участника (дополнительного к регулярной встрече) */}
+                      <div style={{ display: "flex", flexDirection: "column", gap: "6px", borderTop: "1px dashed var(--line, #e2e8f0)", paddingTop: "10px" }}>
+                        <span style={{ fontSize: "11px", color: "var(--muted, #64748b)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Добавить другого участника:</span>
+                        <div style={{ display: "flex", gap: "8px" }}>
+                          <input 
+                            type="text"
+                            placeholder="Введите ФИО и нажмите Enter..."
+                            value={newParticipantName}
+                            onChange={(e) => setNewParticipantName(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                const name = newParticipantName.trim();
+                                if (name && protocol) {
+                                  const current = protocol.participants || [];
+                                  if (!current.includes(name)) {
+                                    const next = [...current, name];
+                                    handleFieldChange("participants", next.join(", "));
+                                  }
+                                  setNewParticipantName("");
+                                }
                               }
                             }}
                             style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: "6px",
-                              padding: "6px 12px",
-                              borderRadius: "99px",
-                              border: isSelected ? "1.5px solid #10b981" : "1.5px solid var(--line, #cbd5e1)",
-                              background: isSelected ? "#e6f4ea" : "#ffffff",
-                              color: isSelected ? "#137333" : "var(--text, #334155)",
+                              flex: 1,
+                              padding: "8px 12px",
+                              fontSize: "13px",
+                              border: "1px solid var(--line, #cbd5e1)",
+                              borderRadius: "8px",
+                              background: "#ffffff",
+                              color: "var(--text, #0f172a)"
+                            }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const name = newParticipantName.trim();
+                              if (name && protocol) {
+                                const current = protocol.participants || [];
+                                if (!current.includes(name)) {
+                                  const next = [...current, name];
+                                  handleFieldChange("participants", next.join(", "));
+                                }
+                                setNewParticipantName("");
+                              }
+                            }}
+                            style={{
+                              padding: "0 14px",
+                              background: "#10b981",
+                              color: "#ffffff",
+                              border: "none",
+                              borderRadius: "8px",
                               cursor: "pointer",
-                              fontSize: "12.5px",
-                              fontWeight: 600,
-                              transition: "all 0.2s ease"
+                              fontSize: "13px",
+                              fontWeight: 700
                             }}
                           >
-                            <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: isSelected ? "#10b981" : "#94a3b8" }} />
-                            {p}
-                            {isSelected ? " ✓" : " +"}
+                            Добавить
                           </button>
-                        );
-                      })}
-                    </div>
-                  </div>
+                        </div>
+                      </div>
 
-                  {/* Добавление внешних участников */}
-                  <div style={{ display: "flex", flexDirection: "column", gap: "6px", borderTop: "1px dashed var(--line, #e2e8f0)", paddingTop: "10px" }}>
-                    <span style={{ fontSize: "11px", color: "var(--muted, #64748b)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Добавить другого участника:</span>
-                    <div style={{ display: "flex", gap: "8px" }}>
-                      <input 
-                        type="text"
-                        placeholder="Введите ФИО и нажмите Enter..."
-                        value={newParticipantName}
-                        onChange={(e) => setNewParticipantName(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
+                      {/* Дополнительные участники с ролями */}
+                      {protocol.participants.filter(p => !dbParticipants.includes(p)).length > 0 && (
+                        <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "8px", borderTop: "1px dashed var(--line, #e2e8f0)", paddingTop: "8px" }}>
+                          <span style={{ fontSize: "11px", color: "var(--muted, #64748b)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                            Дополнительные участники и их роли:
+                          </span>
+                          {protocol.participants.filter(p => !dbParticipants.includes(p)).map((p) => (
+                            <div key={p} style={{ display: "grid", gridTemplateColumns: "160px 1fr auto", alignItems: "center", gap: "12px", padding: "8px", background: "#f1f5f9", border: "1px solid var(--line)", borderRadius: "8px" }}>
+                              <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--text)", paddingLeft: "12px" }}>
+                                👤 {p}
+                              </span>
+                              <input
+                                type="text"
+                                value={customRoles[p] || ""}
+                                onChange={(e) => handleCustomRoleChange(p, e.target.value)}
+                                placeholder="Роль (например: Разработчик)"
+                                style={{
+                                  padding: "6px 10px",
+                                  fontSize: "12.5px",
+                                  border: "1px solid var(--line, #cbd5e1)",
+                                  borderRadius: "6px",
+                                  background: "#ffffff",
+                                  color: "var(--text)"
+                                }}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const next = (protocol?.participants || []).filter(item => item !== p);
+                                  handleFieldChange("participants", next.join(", "));
+                                }}
+                                style={{
+                                  background: "transparent",
+                                  border: "none",
+                                  cursor: "pointer",
+                                  color: "var(--red)",
+                                  fontWeight: "bold",
+                                  padding: "0 8px"
+                                }}
+                              >
+                                ×
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                      <span style={{ fontSize: "11px", color: "var(--muted, #64748b)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                        Обычная встреча (нет закрепленных участников):
+                      </span>
+                      
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <input 
+                          type="text"
+                          placeholder="Введите ФИО участника и нажмите Enter..."
+                          value={newParticipantName}
+                          onChange={(e) => setNewParticipantName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              const name = newParticipantName.trim();
+                              if (name && protocol) {
+                                const current = protocol.participants || [];
+                                if (!current.includes(name)) {
+                                  const next = [...current, name];
+                                  handleFieldChange("participants", next.join(", "));
+                                }
+                                setNewParticipantName("");
+                              }
+                            }
+                          }}
+                          style={{
+                            flex: 1,
+                            padding: "8px 12px",
+                            fontSize: "13px",
+                            border: "1px solid var(--line, #cbd5e1)",
+                            borderRadius: "8px",
+                            background: "#ffffff",
+                            color: "var(--text, #0f172a)"
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
                             const name = newParticipantName.trim();
                             if (name && protocol) {
                               const current = protocol.participants || [];
                               if (!current.includes(name)) {
-                                const next = [...current, name];
-                                handleFieldChange("participants", next.join(", "));
+                                  const next = [...current, name];
+                                  handleFieldChange("participants", next.join(", "));
                               }
                               setNewParticipantName("");
                             }
-                          }
-                        }}
-                        style={{
-                          flex: 1,
-                          padding: "8px 12px",
-                          fontSize: "13px",
-                          border: "1px solid var(--line, #cbd5e1)",
-                          borderRadius: "8px",
-                          background: "#ffffff",
-                          color: "var(--text, #0f172a)"
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const name = newParticipantName.trim();
-                          if (name && protocol) {
-                            const current = protocol.participants || [];
-                            if (!current.includes(name)) {
-                              const next = [...current, name];
-                              handleFieldChange("participants", next.join(", "));
-                            }
-                            setNewParticipantName("");
-                          }
-                        }}
-                        style={{
-                          padding: "0 14px",
-                          background: "#10b981",
-                          color: "#ffffff",
-                          border: "none",
-                          borderRadius: "8px",
-                          cursor: "pointer",
-                          fontSize: "13px",
-                          fontWeight: 700
-                        }}
-                      >
-                        Добавить
-                      </button>
+                          }}
+                          style={{
+                            padding: "0 14px",
+                            background: "#10b981",
+                            color: "#ffffff",
+                            border: "none",
+                            borderRadius: "8px",
+                            cursor: "pointer",
+                            fontSize: "13px",
+                            fontWeight: 700
+                          }}
+                        >
+                          Добавить
+                        </button>
+                      </div>
+
+                      {/* Список участников с полями ввода ролей */}
+                      {(protocol?.participants || []).length > 0 && (
+                        <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "4px" }}>
+                          {protocol.participants.map((p) => (
+                            <div key={p} style={{ display: "grid", gridTemplateColumns: "160px 1fr auto", alignItems: "center", gap: "12px", padding: "8px", background: "#f1f5f9", border: "1px solid var(--line)", borderRadius: "8px" }}>
+                              <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--text)", paddingLeft: "12px" }}>
+                                👤 {p}
+                              </span>
+                              <input
+                                type="text"
+                                value={customRoles[p] || ""}
+                                onChange={(e) => handleCustomRoleChange(p, e.target.value)}
+                                placeholder="Роль (например: Аналитик, Заказчик)"
+                                style={{
+                                  padding: "6px 10px",
+                                  fontSize: "12.5px",
+                                  border: "1px solid var(--line, #cbd5e1)",
+                                  borderRadius: "6px",
+                                  background: "#ffffff",
+                                  color: "var(--text)"
+                                }}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const next = (protocol?.participants || []).filter(item => item !== p);
+                                  handleFieldChange("participants", next.join(", "));
+                                }}
+                                style={{
+                                  background: "transparent",
+                                  border: "none",
+                                  cursor: "pointer",
+                                  color: "var(--red)",
+                                  fontWeight: "bold",
+                                  padding: "0 8px"
+                                }}
+                              >
+                                ×
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  </div>
+                  )}
 
                   {/* Список всех выбранных на эту встречу */}
                   {(protocol?.participants || []).length > 0 && (
                     <div style={{ display: "flex", flexDirection: "column", gap: "6px", borderTop: "1px dashed var(--line, #e2e8f0)", paddingTop: "10px" }}>
                       <span style={{ fontSize: "11px", color: "var(--muted, #64748b)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Выбрано для протокола ({protocol.participants.length}):</span>
                       <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                        {protocol.participants.map((p) => (
-                          <span 
-                            key={p} 
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: "6px",
-                              padding: "4px 10px",
-                              background: "#f1f5f9",
-                              border: "1px solid #e2e8f0",
-                              borderRadius: "6px",
-                              fontSize: "12px",
-                              fontWeight: 500,
-                              color: "#334155"
-                            }}
-                          >
-                            {p}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const next = (protocol?.participants || []).filter(item => item !== p);
-                                handleFieldChange("participants", next.join(", "));
+                        {protocol.participants.map((p) => {
+                          let context = "";
+                          if (meetingFormat === "regular") {
+                            context = regularContexts[p] || customRoles[p] || "";
+                          } else {
+                            context = customRoles[p] || "";
+                          }
+                          const displayText = context ? `${p} (${context})` : p;
+                          return (
+                            <span 
+                              key={p} 
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "6px",
+                                padding: "4px 10px",
+                                background: "#f1f5f9",
+                                border: "1px solid #e2e8f0",
+                                borderRadius: "6px",
+                                fontSize: "12px",
+                                fontWeight: 500,
+                                color: "#334155"
                               }}
-                              style={{ background: "transparent", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", color: "#94a3b8", fontSize: "12px", fontWeight: "bold" }}
                             >
-                              ×
-                            </button>
-                          </span>
-                        ))}
+                              {displayText}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const next = (protocol?.participants || []).filter(item => item !== p);
+                                  handleFieldChange("participants", next.join(", "));
+                                }}
+                                style={{ background: "transparent", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", color: "#94a3b8", fontSize: "12px", fontWeight: "bold" }}
+                              >
+                                ×
+                              </button>
+                            </span>
+                          );
+                        })}
                       </div>
                     </div>
                   )}

@@ -66,8 +66,38 @@ button:disabled {
   min-height: 100vh;
 }
 
+
+
 .app-shell.rail-collapsed {
   grid-template-columns: 78px minmax(0, 1fr);
+}
+
+.rail-collapsed .left-rail {
+  padding: 24px 10px;
+}
+
+.rail-collapsed .brand {
+  justify-content: center;
+  padding: 8px;
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.rail-collapsed .brand-copy,
+.rail-collapsed nav button span {
+  display: none;
+}
+
+.rail-collapsed nav {
+  margin-top: 24px;
+}
+
+.rail-collapsed nav button {
+  justify-content: center;
+  padding: 0;
 }
 
 /* Left Rail Sidebar */
@@ -82,6 +112,32 @@ button:disabled {
   color: var(--text-inverse);
   box-shadow: 4px 0 20px rgba(0, 0, 0, 0.15);
   z-index: 10;
+}
+
+/* Sidebar Logo */
+.sidebar-logo {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  padding: 0 14px;
+  margin-bottom: 16px;
+}
+
+.sidebar-logo img {
+  height: 48px;
+  max-width: 100%;
+  object-fit: contain;
+  filter: brightness(0) invert(1);
+  transition: height 0.2s ease;
+}
+
+.rail-collapsed .sidebar-logo {
+  justify-content: center;
+  padding: 0;
+}
+
+.rail-collapsed .sidebar-logo img {
+  height: 32px;
 }
 
 .brand {
@@ -169,51 +225,7 @@ nav button.active {
   box-shadow: inset 3px 0 0 #38bdf8;
 }
 
-.rail-toggle {
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  margin-left: auto;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: var(--border-radius-sm);
-  background: rgba(255, 255, 255, 0.03);
-  color: #94a3b8;
-}
 
-.rail-toggle:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--text-inverse);
-}
-
-/* Collapsed Sidebar */
-.rail-collapsed .left-rail {
-  padding: 24px 10px;
-}
-
-.rail-collapsed .brand {
-  justify-content: center;
-  padding: 8px;
-}
-
-.rail-collapsed .brand-copy,
-.rail-collapsed nav button span {
-  display: none;
-}
-
-.rail-collapsed .rail-toggle {
-  margin-left: auto;
-  margin-right: auto;
-}
-
-.rail-collapsed nav {
-  margin-top: 24px;
-}
-
-.rail-collapsed nav button {
-  justify-content: center;
-  padding: 0;
-}
 
 /* Main Workspace */
 .workspace {
@@ -511,7 +523,7 @@ nav button.active {
   top: calc(100% + 4px);
   left: 0;
   right: 0;
-  max-height: 180px;
+  max-height: 290px;
   overflow-y: auto;
   border: 1px solid var(--line);
   border-radius: var(--border-radius-sm);

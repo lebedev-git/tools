@@ -2,7 +2,8 @@ import { getNextJob, updateJob, getProtocols, saveProtocol, saveProcessRun, reap
 import { GeminiClient, DeepgramClient, formatYandexDate, LlmClient, normalizeYandexValue, YandexFormsClient, getRuntimeConfig, OpenNotebookClient, type RuntimeConfig } from "@tools/integrations";
 import { yandexFormIds } from "@tools/analytics";
 import { mkdir, writeFile, readFile, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join, dirname } from "node:path";
 import { spawn } from "node:child_process";
 import type { ProtocolRecord } from "@tools/protocols";
 import type { ProcessRun } from "@tools/core";
@@ -211,7 +212,7 @@ async function mapSpeakersToNames(
   }
 
   try {
-    const llm = new LlmClient(config);
+    const llm = new GeminiClient(config, "protocols");
     const systemPrompt =
       "Ты сопоставляешь анонимных спикеров стенограммы с реальными участниками встречи. " +
       "Верни СТРОГО JSON-объект без каких-либо пояснений: ключ — номер спикера (строкой), " +
@@ -256,7 +257,7 @@ async function processProtocolJob(jobId: number, payload: any) {
   const cloudFilesToCleanup: string[] = [];
 
   try {
-    const gemini = new GeminiClient();
+    const gemini = new GeminiClient(getRuntimeConfig(), "protocols");
     let finalTranscript = "";
 
     if (tempInputPath) {
@@ -508,7 +509,7 @@ async function processProtocolJob(jobId: number, payload: any) {
       }
     }
     // Cleanup cloud files
-    const gemini = new GeminiClient();
+    const gemini = new GeminiClient(getRuntimeConfig(), "protocols");
     for (const cloudFile of cloudFilesToCleanup) {
       try {
         await gemini.deleteFile(cloudFile);
@@ -634,6 +635,79 @@ function buildStageReports(payload: any, stageReports: Record<string, string>) {
   );
 }
 
+function findMonorepoRoot(): string {
+  let dir = process.cwd();
+  while (true) {
+    if (existsSync(join(dir, "pnpm-workspace.yaml"))) {
+      return dir;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) {
+      return process.cwd();
+    }
+    dir = parent;
+  }
+}
+
+function getAccountsPath() {
+  if (existsSync("/app/image-service-data")) {
+    return "/app/image-service-data/accounts.json";
+  }
+  const root = findMonorepoRoot();
+  return join(root, "image-service-data/accounts.json");
+}
+
+async function handleImageLimitError(errorMsg: string) {
+  const isLimitError = errorMsg.includes("достигли своего лимита") ||
+                       errorMsg.includes("limit of image generation") ||
+                       errorMsg.includes("limit") ||
+                       errorMsg.includes("quota") ||
+                       errorMsg.includes("429");
+  if (!isLimitError) return;
+
+  try {
+    const accountsPath = getAccountsPath();
+    if (!existsSync(accountsPath)) return;
+    const raw = readFileSync(accountsPath, "utf8");
+    const accounts = JSON.parse(raw);
+    if (!Array.isArray(accounts) || accounts.length === 0) return;
+
+    let lastUsedAccountIndex = -1;
+    let maxTime = 0;
+
+    accounts.forEach((acc: any, index: number) => {
+      if (acc.last_used_at) {
+        const time = new Date(acc.last_used_at).getTime();
+        if (!isNaN(time) && time > maxTime) {
+          maxTime = time;
+          lastUsedAccountIndex = index;
+        }
+      }
+    });
+
+    if (lastUsedAccountIndex !== -1) {
+      const acc = accounts[lastUsedAccountIndex];
+      if (!acc.limits_progress) acc.limits_progress = [];
+      
+      let imgGenLimit = acc.limits_progress.find((l: any) => l.feature_name === "image_gen");
+      if (imgGenLimit) {
+        imgGenLimit.remaining = 0;
+      } else {
+        acc.limits_progress.push({
+          feature_name: "image_gen",
+          remaining: 0,
+          reset_after: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+        });
+      }
+      
+      writeFileSync(accountsPath, JSON.stringify(accounts, null, 2), "utf8");
+      console.log(`[Worker] Reset remaining limits to 0 for account: ${acc.email} due to error: ${errorMsg}`);
+    }
+  } catch (err) {
+    console.error("Failed to reset limit for last used account:", err);
+  }
+}
+
 async function processAnalyticsJob(jobId: number, payload: any) {
   const { day1Date, day2Date, selectedBlocks, stagePrompts, assetFiles, stageReports, customAnswers } = payload;
 
@@ -709,7 +783,7 @@ async function processAnalyticsJob(jobId: number, payload: any) {
     updateJob(jobId, { progress: 20, message: "Формы загружены. Запуск ИИ-моделей..." });
 
     if (totalAnswers > 0 || blocks.includes("infographic") || blocks.includes("infographic-prompt") || blocks.includes("infographic-image") || blocks.includes("publish")) {
-      const llm = new LlmClient();
+      const llm = new GeminiClient(getRuntimeConfig(), "analytics");
 
       const generateImageViaTextLlm = async (systemPrompt: string, visualPrompt: string, logos: string[], photos: string[]): Promise<string> => {
         const userContent: Array<Record<string, any>> = [
@@ -894,9 +968,10 @@ async function processAnalyticsJob(jobId: number, payload: any) {
 
           infographicImageUrl = await generateImageViaTextLlm(basePrompt, visualPrompt, logos, photos);
           jobStageReports["infographic-image"] = `Изображение инфографики успешно сгенерировано.`;
-        } catch (imgError) {
+        } catch (imgError: any) {
           console.error("Failed to generate image with model gpt-5.5:", imgError);
           jobStageReports["infographic-image"] = `Ошибка генерации изображения.`;
+          await handleImageLimitError(imgError.message || String(imgError));
           throw imgError;
         }
       }
@@ -925,9 +1000,10 @@ async function processAnalyticsJob(jobId: number, payload: any) {
           infographicImageUrl = await generateImageViaTextLlm(basePrompt, visualPrompt, logos, photos);
           
           jobStageReports.infographic = `# Инфографика\n\nМакет инфографики:\n${visualPrompt}`;
-        } catch (imgError) {
+        } catch (imgError: any) {
           console.error("Failed to generate image:", imgError);
           jobStageReports.infographic = `# Инфографика\n\nОшибка генерации изображения.`;
+          await handleImageLimitError(imgError.message || String(imgError));
           throw imgError;
         }
       }

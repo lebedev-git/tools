@@ -24,7 +24,8 @@ export default function PromptsView({
       ];
     } else {
       return [
-        { id: "protocol.meeting", title: "Шаблон протокола", description: "Анализ стенограммы встречи и формирование протокола" },
+        { id: "protocol.regular.meeting", title: "Шаблон регулярной встречи", description: "Анализ стенограммы регулярной встречи (синка/статуса) с учетом ролей" },
+        { id: "protocol.meeting", title: "Шаблон обычной встречи", description: "Анализ стенограммы обычной встречи и формирование протокола" },
         { id: "protocol.transcript", title: "Шаблон стенограммы", description: "Транскрибация аудиофайла и разделение по спикерам" }
       ];
     }

@@ -35,6 +35,8 @@ interface KeySettings {
     imageModel: string;
     geminiModelAnalytics: string;
     geminiModelProtocols: string;
+    geminiBaseUrlAnalytics: string;
+    geminiBaseUrlProtocols: string;
   };
   accounts: Account[];
 }
@@ -54,6 +56,8 @@ export default function SettingsView({ workspace }: { workspace: "analytics" | "
   const [imageModel, setImageModel] = useState("");
   const [geminiModelAnalytics, setGeminiModelAnalytics] = useState("");
   const [geminiModelProtocols, setGeminiModelProtocols] = useState("");
+  const [geminiBaseUrlAnalytics, setGeminiBaseUrlAnalytics] = useState("");
+  const [geminiBaseUrlProtocols, setGeminiBaseUrlProtocols] = useState("");
   const [accounts, setAccounts] = useState<Account[]>([]);
 
   // Temp inputs for adding new keys
@@ -125,6 +129,8 @@ export default function SettingsView({ workspace }: { workspace: "analytics" | "
             setImageModel(data.customSettings.imageModel || "");
             setGeminiModelAnalytics(data.customSettings.geminiModelAnalytics || "gemini-2.5-flash");
             setGeminiModelProtocols(data.customSettings.geminiModelProtocols || "gemini-2.5-flash");
+            setGeminiBaseUrlAnalytics(data.customSettings.geminiBaseUrlAnalytics || "");
+            setGeminiBaseUrlProtocols(data.customSettings.geminiBaseUrlProtocols || "");
             setAccounts(data.accounts || []);
           }
         }
@@ -206,6 +212,8 @@ export default function SettingsView({ workspace }: { workspace: "analytics" | "
       imageModel,
       geminiModelAnalytics,
       geminiModelProtocols,
+      geminiBaseUrlAnalytics,
+      geminiBaseUrlProtocols,
       accounts
     };
     try {
@@ -344,6 +352,20 @@ export default function SettingsView({ workspace }: { workspace: "analytics" | "
                     </button>
                   </div>
                 </div>
+              </div>
+
+              {/* Gemini Base URL proxy for Analytics */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "6px", borderTop: "1px solid var(--line)", paddingTop: "16px", marginTop: "8px" }}>
+                <label style={{ display: "grid", gap: "6px" }}>
+                  <span style={{ fontSize: "12px", fontWeight: "bold", color: "var(--text)" }}>Адрес API (Base URL) для Gemini в Аналитике (через Cloudflare)</span>
+                  <input 
+                    type="text" 
+                    value={geminiBaseUrlAnalytics} 
+                    onChange={(e) => setGeminiBaseUrlAnalytics(e.target.value)} 
+                    placeholder="Например, https://my-gemini-proxy.username.workers.dev (оставьте пустым для стандартного адреса)"
+                    style={{ padding: "10px 14px", border: "1px solid var(--line)", borderRadius: "var(--border-radius)", fontSize: "13px" }}
+                  />
+                </label>
               </div>
             </section>
 
@@ -594,6 +616,20 @@ export default function SettingsView({ workspace }: { workspace: "analytics" | "
                   </button>
                 </div>
               </div>
+            </div>
+
+            {/* Gemini Base URL proxy for Protocols */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "6px", borderTop: "1px solid var(--line)", paddingTop: "16px", marginTop: "16px" }}>
+              <label style={{ display: "grid", gap: "6px" }}>
+                <span style={{ fontSize: "12px", fontWeight: "bold", color: "var(--text)" }}>Адрес API (Base URL) для Gemini в Протоколах (через Cloudflare)</span>
+                <input 
+                  type="text" 
+                  value={geminiBaseUrlProtocols} 
+                  onChange={(e) => setGeminiBaseUrlProtocols(e.target.value)} 
+                  placeholder="Например, https://my-gemini-proxy.username.workers.dev (оставьте пустым для стандартного адреса)"
+                  style={{ padding: "10px 14px", border: "1px solid var(--line)", borderRadius: "var(--border-radius)", fontSize: "13px" }}
+                />
+              </label>
             </div>
           </section>
         )}

@@ -76,7 +76,9 @@ export async function GET() {
       imageServiceUrl: getPrompt("config.image_service_url", ""),
       imageModel: getPrompt("config.image_model", ""),
       geminiModelAnalytics: getPrompt("config.gemini_model_analytics", "gemini-2.5-flash"),
-      geminiModelProtocols: getPrompt("config.gemini_model_protocols", "gemini-2.5-flash")
+      geminiModelProtocols: getPrompt("config.gemini_model_protocols", "gemini-2.5-flash"),
+      geminiBaseUrlAnalytics: getPrompt("config.gemini_base_url_analytics", ""),
+      geminiBaseUrlProtocols: getPrompt("config.gemini_base_url_protocols", "")
     };
 
     // Load GPT Accounts for infographic
@@ -125,6 +127,8 @@ export async function PUT(request: Request) {
       imageModel?: string;
       geminiModelAnalytics?: string;
       geminiModelProtocols?: string;
+      geminiBaseUrlAnalytics?: string;
+      geminiBaseUrlProtocols?: string;
       accounts?: Array<{
         email: string;
         access_token: string;
@@ -224,6 +228,12 @@ export async function PUT(request: Request) {
     }
     if (payload.geminiModelProtocols !== undefined) {
       setPrompt("config.gemini_model_protocols", payload.geminiModelProtocols);
+    }
+    if (payload.geminiBaseUrlAnalytics !== undefined) {
+      setPrompt("config.gemini_base_url_analytics", payload.geminiBaseUrlAnalytics);
+    }
+    if (payload.geminiBaseUrlProtocols !== undefined) {
+      setPrompt("config.gemini_base_url_protocols", payload.geminiBaseUrlProtocols);
     }
 
     // Handle GPT Accounts

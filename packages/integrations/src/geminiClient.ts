@@ -7,7 +7,9 @@ export class GeminiClient {
   ) {}
 
   private getBaseUrl(): string {
-    const raw = this.config.geminiBaseUrl;
+    const raw = this.workspace === "analytics"
+      ? (this.config.geminiBaseUrlAnalytics || this.config.geminiBaseUrl)
+      : (this.config.geminiBaseUrlProtocols || this.config.geminiBaseUrl);
     if (raw) {
       return raw.endsWith("/") ? raw.slice(0, -1) : raw;
     }

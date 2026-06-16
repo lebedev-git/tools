@@ -30,6 +30,8 @@ export interface RuntimeConfig {
   geminiApiKeyAnalytics?: string;
   geminiApiKeyProtocols?: string;
   geminiBaseUrl?: string;
+  geminiBaseUrlAnalytics?: string;
+  geminiBaseUrlProtocols?: string;
   deepgramApiKey?: string;
   deepgramModel?: string;
   deepgramBaseUrl?: string;
@@ -69,6 +71,9 @@ export function getRuntimeConfig(env: NodeJS.ProcessEnv = process.env): RuntimeC
   const geminiApiKeyAnalytics = [baseGemini, extraGeminiAnalytics || extraGemini].map(k => k.trim()).filter(Boolean).join(",");
   const geminiApiKeyProtocols = [baseGemini, extraGeminiProtocols || extraGemini].map(k => k.trim()).filter(Boolean).join(",");
 
+  const geminiBaseUrlAnalytics = getPrompt("config.gemini_base_url_analytics", env.GEMINI_BASE_URL ?? "") || undefined;
+  const geminiBaseUrlProtocols = getPrompt("config.gemini_base_url_protocols", env.GEMINI_BASE_URL ?? "") || undefined;
+
   const extraDeepgram = getPrompt("config.extra_deepgram_keys", "");
   const baseDeepgram = env.DEEPGRAM_API_KEY ?? "";
   const deepgramApiKey = [baseDeepgram, extraDeepgram].map(k => k.trim()).filter(Boolean).join(",");
@@ -96,6 +101,8 @@ export function getRuntimeConfig(env: NodeJS.ProcessEnv = process.env): RuntimeC
     geminiApiKeyAnalytics,
     geminiApiKeyProtocols,
     geminiBaseUrl: env.GEMINI_BASE_URL,
+    geminiBaseUrlAnalytics,
+    geminiBaseUrlProtocols,
     deepgramApiKey,
     deepgramModel,
     deepgramBaseUrl: env.DEEPGRAM_BASE_URL,

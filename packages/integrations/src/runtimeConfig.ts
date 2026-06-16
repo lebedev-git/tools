@@ -85,7 +85,7 @@ export function getRuntimeConfig(env: NodeJS.ProcessEnv = process.env): RuntimeC
   const geminiModelProtocols = getPrompt("config.gemini_model_protocols", "gemini-2.5-flash");
 
   const imageServiceApiKey = getPrompt("config.extra_image_service_key", env.IMAGE_SERVICE_API_KEY ?? "") || undefined;
-  const imageServiceUrl = getPrompt("config.image_service_url", env.IMAGE_SERVICE_URL ?? "http://automation-codex-service:3007/codex-internal");
+  const imageServiceUrl = getPrompt("config.image_service_url", "").trim() || env.IMAGE_SERVICE_URL || "http://automation-codex-service:3007/codex-internal";
   const imageModel = getPrompt("config.image_model", "") || undefined;
 
   return {

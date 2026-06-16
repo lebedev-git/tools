@@ -806,7 +806,7 @@ async function processAnalyticsJob(jobId: number, payload: any) {
         const config = getRuntimeConfig();
         const localLlm = new LlmClient({
           ...config,
-          llmBaseUrl: config.imageServiceUrl || "http://127.0.0.1:8000/v1",
+          llmBaseUrl: config.imageServiceUrl || "http://image-service:80/v1",
           llmApiKey: config.imageServiceApiKey || "chatgpt2api"
         });
 

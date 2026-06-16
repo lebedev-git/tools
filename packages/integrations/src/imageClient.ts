@@ -34,6 +34,15 @@ export class ImageGenerationClient {
       ...(options.photo ? { photo: options.photo } : {})
     });
 
+    console.log("=== Image Generation Request ===");
+    console.log("Model:", modelName);
+    console.log("Size:", options.size ?? "1024x1024");
+    console.log("Quality:", options.quality ?? "standard");
+    console.log("Prompt:", options.prompt);
+    console.log("Logo length:", options.logo ? (Array.isArray(options.logo) ? options.logo.map(l => l.length) : options.logo.length) : 0);
+    console.log("Photo length:", options.photo ? (Array.isArray(options.photo) ? options.photo.map(p => p.length) : options.photo.length) : 0);
+    console.log("================================");
+
     return new Promise<string>((resolve, reject) => {
       const reqOptions = {
         hostname: parsedUrl.hostname,
@@ -120,32 +129,14 @@ export class ImageGenerationClient {
       this.config.imageServiceUrl.includes("127.0.0.1")
     );
     const baseUrl = isInternal ? this.config.imageServiceUrl : "https://codex.sale/v1";
-    const apiKey = isInternal ? "" : "sk-clb-3APylzCeyo_r4Lapmp_eLgQl5Ul973_z6QLyRWD1L1A";
-    const modelName = options.model ?? (isInternal ? "gpt-5.5" : "gpt-image-2");
+    const apiKey = isInternal ? (this.config.imageServiceApiKey ?? "") : "sk-clb-3APylzCeyo_r4Lapmp_eLgQl5Ul973_z6QLyRWD1L1A";
+    let modelName = options.model ?? (isInternal ? "gpt-5.5" : "gpt-image-2");
+    if (!isInternal && modelName === "gpt-5.5") {
+      modelName = "gpt-image-2";
+    }
 
     try {
       return await this.executeRequest(baseUrl, apiKey, modelName, options, controller.signal);
-    } catch (error: any) {
-      if (isInternal) {
-        console.warn(`Internal image service failed (${error.message}). Trying fallback to external Codex Sale API...`);
-        
-        const fallbackUrl = "https://codex.sale/v1";
-        const fallbackApiKey = "sk-clb-3APylzCeyo_r4Lapmp_eLgQl5Ul973_z6QLyRWD1L1A";
-        const fallbackModel = "gpt-image-2";
-
-        const fallbackController = new AbortController();
-        const fallbackTimeoutId = setTimeout(() => fallbackController.abort(), 900000);
-        
-        try {
-          return await this.executeRequest(fallbackUrl, fallbackApiKey, fallbackModel, options, fallbackController.signal);
-        } catch (fallbackError: any) {
-          console.error("External Codex Sale API fallback also failed:", fallbackError.message);
-          throw fallbackError;
-        } finally {
-          clearTimeout(fallbackTimeoutId);
-        }
-      }
-      throw error;
     } finally {
       clearTimeout(timeoutId);
     }

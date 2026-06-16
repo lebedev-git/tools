@@ -1,0 +1,43 @@
+FROM node:22-alpine AS base
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable
+WORKDIR /app
+
+# Install dependencies only when needed
+FROM base AS deps
+RUN apk add --no-cache libc6-compat ffmpeg python3 make g++
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY apps/worker/package.json ./apps/worker/
+COPY packages/core/package.json ./packages/core/
+COPY packages/db/package.json ./packages/db/
+COPY packages/analytics/package.json ./packages/analytics/
+COPY packages/integrations/package.json ./packages/integrations/
+COPY packages/protocols/package.json ./packages/protocols/
+RUN pnpm install --no-frozen-lockfile
+
+# Rebuild the source code only when needed
+FROM base AS builder
+COPY --from=deps /app ./
+COPY . .
+
+# Build step is not strictly required for worker since it runs index.ts directly using tsx,
+# but we need packages built if they have any build steps. Since this is a monorepo, 
+# running pnpm install creates all local symlinks correctly.
+# We will use base image with ffmpeg for runner
+FROM base AS runner
+WORKDIR /app
+
+# Install runtime dependencies: ffmpeg is critical for audio conversions
+RUN apk add --no-cache ffmpeg
+
+ENV NODE_ENV=production
+
+# Copy dependencies and sources
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=builder /app ./
+
+# Create storage directory and set permissions
+RUN mkdir -p .data/storage .data/temp
+
+CMD ["npx", "tsx", "apps/worker/src/index.ts"]

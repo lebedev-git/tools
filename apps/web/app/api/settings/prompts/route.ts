@@ -1,6 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { getRuntimeConfig } from "@tools/integrations";
+import { getPrompt, setPrompt } from "@tools/db";
 
 const promptDefaults = {
   day1: "Проанализируй анкеты обратной связи участников за День 1. Сделай структурированный отчет на русском языке.\nВыдели:\n1. Количество ответов, индекс NPS.\n2. Топ-3 освоенных инструментов (например: Perplexity, Gamma, Suno).\n3. Качественные показатели изменения отношения к ИИ (в процентах и долях).\n4. Качественные эффекты: преодоление страха (уверенность на входе/выходе), формирование единого понятийного поля, практические результаты внедрения.",
@@ -18,40 +16,43 @@ const promptDefaults = {
 type PromptKey = keyof typeof promptDefaults;
 type PromptSettings = Record<PromptKey, string>;
 
-function promptsPath() {
-  return join(process.cwd(), getRuntimeConfig().storagePath, "settings", "analytics-prompts.json");
-}
-
-function normalizePrompts(input: unknown): PromptSettings {
-  const source = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
-  const next = { ...promptDefaults };
-
-  for (const key of Object.keys(promptDefaults) as Array<PromptKey>) {
-    const value = source[key];
-    if (typeof value === "string") {
-      next[key] = value;
-    }
+function loadAllPrompts(): PromptSettings {
+  const settings = {} as PromptSettings;
+  for (const key of Object.keys(promptDefaults) as PromptKey[]) {
+    settings[key] = getPrompt(key, promptDefaults[key]);
   }
-
-  return next;
+  return settings;
 }
 
 export async function GET() {
   try {
-    const stored = JSON.parse(await readFile(promptsPath(), "utf-8")) as unknown;
-    return Response.json({ prompts: normalizePrompts(stored) });
-  } catch {
+    return Response.json({ prompts: loadAllPrompts() });
+  } catch (err) {
+    console.error("Failed to load prompts:", err);
     return Response.json({ prompts: promptDefaults });
   }
 }
 
 export async function PUT(request: Request) {
-  const payload = (await request.json()) as { prompts?: unknown };
-  const prompts = normalizePrompts(payload.prompts);
-  const filePath = promptsPath();
-
-  await mkdir(dirname(filePath), { recursive: true });
-  await writeFile(filePath, JSON.stringify(prompts, null, 2), "utf-8");
-
-  return Response.json({ status: "saved", prompts });
+  try {
+    const payload = (await request.json()) as { prompts?: Record<string, unknown> };
+    const source = payload.prompts || {};
+    
+    for (const key of Object.keys(promptDefaults) as PromptKey[]) {
+      const val = source[key];
+      if (typeof val === "string") {
+        setPrompt(key, val);
+      }
+    }
+    
+    return Response.json({ status: "saved", prompts: loadAllPrompts() });
+  } catch (error) {
+    return Response.json(
+      {
+        status: "error",
+        message: error instanceof Error ? error.message : "Failed to save prompts."
+      },
+      { status: 500 }
+    );
+  }
 }

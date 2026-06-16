@@ -4,13 +4,18 @@
   "private": true,
   "packageManager": "pnpm@10.24.0",
   "scripts": {
-    "dev": "corepack pnpm --filter @tools/web dev",
-    "worker:dev": "corepack pnpm --filter @tools/worker dev",
-    "build": "corepack pnpm --filter @tools/web build",
-    "lint": "corepack pnpm --filter @tools/web lint",
-    "typecheck": "corepack pnpm --filter @tools/web typecheck"
+    "predev": "node -e \"const fs = require('fs'); fs.copyFileSync('.env', 'apps/web/.env'); fs.copyFileSync('.env', 'apps/worker/.env');\"",
+    "dev": "node scripts/dev.js",
+    "preworker:dev": "node -e \"const fs = require('fs'); fs.copyFileSync('.env', 'apps/worker/.env');\"",
+    "worker:dev": "npx pnpm --filter @tools/worker dev",
+    "prebuild": "node -e \"const fs = require('fs'); fs.copyFileSync('.env', 'apps/web/.env');\"",
+    "build": "npx pnpm --filter @tools/web build",
+    "lint": "npx pnpm --filter @tools/web lint",
+    "typecheck": "npx pnpm --filter @tools/web typecheck"
   },
   "devDependencies": {
+    "ssh2": "^1.17.0",
+    "tsx": "^4.22.4",
     "typescript": "^5.9.3"
   }
 }

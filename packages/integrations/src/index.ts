@@ -1,5 +1,5 @@
 export interface IntegrationDescriptor {
-  id: "yandex_forms" | "outline" | "llm_provider" | "file_storage" | "image_service" | "gemini_service";
+  id: "yandex_forms" | "outline" | "llm_provider" | "file_storage" | "image_service" | "gemini_service" | "deepgram_service" | "open_notebook";
   title: string;
   usedBy: Array<"analytics" | "protocol">;
   requiredEnv: string[];
@@ -19,6 +19,12 @@ export const integrationRegistry: IntegrationDescriptor[] = [
     requiredEnv: ["OUTLINE_API_URL", "OUTLINE_TOKEN"]
   },
   {
+    id: "open_notebook",
+    title: "Open Notebook",
+    usedBy: ["analytics", "protocol"],
+    requiredEnv: ["OPEN_NOTEBOOK_API_URL"]
+  },
+  {
     id: "llm_provider",
     title: "OpenAI-compatible LLM provider",
     usedBy: ["analytics", "protocol"],
@@ -29,6 +35,12 @@ export const integrationRegistry: IntegrationDescriptor[] = [
     title: "Google Gemini 2.5 Flash API",
     usedBy: ["protocol"],
     requiredEnv: ["GEMINI_API_KEY"]
+  },
+  {
+    id: "deepgram_service",
+    title: "Deepgram Speech-to-Text (diarization)",
+    usedBy: ["protocol"],
+    requiredEnv: ["DEEPGRAM_API_KEY"]
   },
   {
     id: "file_storage",
@@ -56,3 +68,10 @@ export {
 export { LlmClient, type ChatCompletionOptions, type ChatMessage } from "./llmClient";
 export { ImageGenerationClient, type ImageGenerationOptions } from "./imageClient";
 export { GeminiClient } from "./geminiClient";
+export {
+  DeepgramClient,
+  type DeepgramUtterance,
+  type DeepgramTranscriptionResult,
+  type DeepgramTranscribeOptions
+} from "./deepgramClient";
+export { OpenNotebookClient, type OpenNotebookNotebook, type OpenNotebookSource } from "./openNotebookClient";

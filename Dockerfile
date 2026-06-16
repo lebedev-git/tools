@@ -14,7 +14,7 @@ COPY packages/db/package.json ./packages/db/
 COPY packages/analytics/package.json ./packages/analytics/
 COPY packages/integrations/package.json ./packages/integrations/
 COPY packages/protocols/package.json ./packages/protocols/
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --no-frozen-lockfile
 
 # Rebuild the source code only when needed
 FROM base AS builder
@@ -35,6 +35,9 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
+RUN apk add --no-cache libreoffice udev ttf-dejavu ttf-freefont ttf-liberation fontconfig \
+    && fc-cache -f
+
 # Set the correct permission for prerender cache
 RUN mkdir -p apps/web/.next
 RUN chown -R nextjs:nodejs apps/web/.next
@@ -43,6 +46,8 @@ RUN chown -R nextjs:nodejs apps/web/.next
 COPY --from=builder /app/apps/web/public ./apps/web/public
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./apps/web/.next/static
+
+RUN rm -f apps/web/.env
 
 USER nextjs
 

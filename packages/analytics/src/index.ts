@@ -56,7 +56,7 @@ export const analyticsBlocks: AnalyticsBlock[] = [
     id: "publish",
     title: "Публикация",
     enabled: false,
-    description: "Публикация отчетов и результатов в Outline."
+    description: "Публикация отчетов и результатов в Open Notebook."
   }
 ];
 

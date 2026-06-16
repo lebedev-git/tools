@@ -11,6 +11,7 @@
   "dependencies": {
     "@tools/analytics": "workspace:*",
     "@tools/core": "workspace:*",
+    "@tools/db": "workspace:*",
     "@tools/integrations": "workspace:*",
     "@tools/protocols": "workspace:*",
     "docx": "^9.7.1",

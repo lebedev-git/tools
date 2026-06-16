@@ -4,14 +4,17 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx src/index.ts",
+    "dev": "tsx --env-file=.env src/index.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@tools/analytics": "workspace:*",
     "@tools/core": "workspace:*",
+    "@tools/db": "workspace:*",
     "@tools/integrations": "workspace:*",
-    "@tools/protocols": "workspace:*"
+    "@tools/protocols": "workspace:*",
+    "jszip": "^3.10.1"
+
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

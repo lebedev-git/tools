@@ -11,7 +11,7 @@ export class GeminiClient {
     return "https://generativelanguage.googleapis.com";
   }
 
-  private static currentKeyIndex = 0;
+  private currentKeyIndex = 0;
 
   private getApiKeys(): string[] {
     const rawKeys = this.config.geminiApiKey;
@@ -26,13 +26,13 @@ export class GeminiClient {
   }
 
   private getApiKey(keys: string[]): string {
-    return keys[GeminiClient.currentKeyIndex % keys.length];
+    return keys[this.currentKeyIndex % keys.length];
   }
 
   private rotateKey(keys: string[]): void {
     if (keys.length > 1) {
-      GeminiClient.currentKeyIndex = (GeminiClient.currentKeyIndex + 1) % keys.length;
-      console.warn(`Gemini API key rotated. New active index: ${GeminiClient.currentKeyIndex}`);
+      this.currentKeyIndex = (this.currentKeyIndex + 1) % keys.length;
+      console.warn(`Gemini API key rotated. New active index: ${this.currentKeyIndex}`);
     }
   }
 
@@ -279,7 +279,7 @@ export class GeminiClient {
 ${prompt}`;
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 seconds timeout
+      const timeoutId = setTimeout(() => controller.abort(), 300000); // 300 seconds timeout
 
       try {
         const response = await fetch(url, {
@@ -317,7 +317,7 @@ ${prompt}`;
         return rawText.trim();
       } catch (error: any) {
         if (error.name === "AbortError") {
-          throw new Error("Gemini protocol generation request timed out after 60 seconds.");
+          throw new Error("Gemini protocol generation request timed out after 300 seconds.");
         }
         throw error;
       } finally {

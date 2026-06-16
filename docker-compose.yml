@@ -10,8 +10,52 @@ services:
       - .env
     environment:
       - PORT=3000
+    volumes:
+      - shared-data:/app/.data
+    networks:
+      - default
+      - notebook_net
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - IMAGE_SERVICE_URL=http://image-service:80/v1
+    volumes:
+      - shared-data:/app/.data
+    networks:
+      - default
+      - notebook_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  image-service:
+    image: ghcr.io/basketikun/chatgpt2api:latest
+    container_name: tools-image-service
+    restart: always
+    volumes:
+      - ./config.json:/app/config.json
+      - ./image-service-data:/app/data
+    networks:
+      - default
+
+volumes:
+  shared-data:
+
+networks:
+  default:
+  notebook_net:
+    external: true
+    name: notebook_default

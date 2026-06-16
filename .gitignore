@@ -9,4 +9,6 @@ coverage
 rendered
 scratch
 .data
+project.tar.gz
+image-service-data/
 

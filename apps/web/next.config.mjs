@@ -9,7 +9,10 @@ const nextConfig = {
     root: repoRoot
   },
   transpilePackages: ["@tools/core", "@tools/analytics", "@tools/protocols", "@tools/integrations"],
-  devIndicators: false
+  devIndicators: false,
+  experimental: {
+    proxyClientMaxBodySize: "500mb"
+  }
 };
 
 export default nextConfig;

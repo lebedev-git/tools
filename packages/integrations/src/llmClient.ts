@@ -24,13 +24,45 @@ interface ChatCompletionResponse {
 }
 
 export class LlmClient {
+  private currentKeyIndex = 0;
+
   public constructor(private readonly config: RuntimeConfig = getRuntimeConfig()) {}
 
-  public async createChatCompletion(options: ChatCompletionOptions): Promise<string> {
-    if (!this.config.llmApiKey) {
+  private getApiKeys(): string[] {
+    const rawKeys = this.config.llmApiKey;
+    if (!rawKeys) {
       throw new Error("LLM_API_KEY is not configured.");
     }
+    const keys = rawKeys.split(",").map((k) => k.trim()).filter(Boolean);
+    if (keys.length === 0) {
+      throw new Error("No valid keys found in LLM_API_KEY.");
+    }
+    return keys;
+  }
 
+  private getApiKey(keys: string[]): string {
+    return keys[this.currentKeyIndex % keys.length];
+  }
+
+  private rotateKey(keys: string[]): void {
+    if (keys.length > 1) {
+      this.currentKeyIndex = (this.currentKeyIndex + 1) % keys.length;
+      console.warn(`LLM API key rotated. New active index: ${this.currentKeyIndex}`);
+    }
+  }
+
+  public async createChatCompletion(options: ChatCompletionOptions): Promise<string> {
+    const keys = this.getApiKeys();
+    return this.executeWithRetry(options, keys, 3, 2000);
+  }
+
+  private async executeWithRetry(
+    options: ChatCompletionOptions,
+    keys: string[],
+    retries = 3,
+    delay = 2000
+  ): Promise<string> {
+    const apiKey = this.getApiKey(keys);
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 120000);
 
@@ -38,7 +70,7 @@ export class LlmClient {
       const response = await fetch(`${this.config.llmBaseUrl}${this.config.llmChatCompletionsPath}`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${this.config.llmApiKey}`,
+          Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
@@ -68,6 +100,20 @@ export class LlmClient {
       cleaned = cleaned.replace(/Request ID:\s*[a-f0-9-]+\s*/gi, "");
       return cleaned.trim();
     } catch (error: any) {
+      const isRateLimit = error.message?.includes("Rate limit") || error.message?.includes("rate limit") || error.message?.includes("429") || error.message?.includes("Limit reached");
+      const is5xx = error.message?.includes("500") || error.message?.includes("503") || error.message?.includes("502");
+      const isTimeout = error.message?.includes("timed out") || error.name === "AbortError";
+      const isNetwork = error.name === "TypeError" || error.message?.includes("fetch failed");
+
+      if (retries > 0 && (isRateLimit || is5xx || isTimeout || isNetwork)) {
+        if (isRateLimit || is5xx) {
+          this.rotateKey(keys);
+        }
+        console.warn(`LLM API operation failed. Retrying in ${delay}ms... (${retries} attempts left). Error: ${error.message}`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        return this.executeWithRetry(options, keys, retries - 1, delay * 2);
+      }
+
       if (error.name === "AbortError") {
         throw new Error("LLM request timed out after 120 seconds.");
       }

@@ -21,6 +21,9 @@ export interface ProtocolRecord {
   risks?: string;
   attachments?: string;
   meetingFormat?: "regular" | "free";
+  notebookId?: string;
+  notebookUrl?: string;
+  saveToNotebook?: boolean;
 }
 
 export const protocolFields = [

@@ -8,7 +8,8 @@ import {
   Play,
   Save,
   X,
-  CheckCircle2
+  CheckCircle2,
+  ExternalLink
 } from "lucide-react";
 import { latestProtocolRun, type ProtocolRecord } from "@tools/protocols";
 import type { ProcessRun } from "@tools/core";
@@ -177,16 +178,14 @@ export default function ProtocolsView({
     }
   };
 
-  const handlePublishToOpenNotebook = async () => {
-    if (!protocol) return;
-    
+  const publishProtocolDirectly = async (targetProtocolId: string, showNotification = true) => {
     setIsPublishing(true);
     setError(null);
     try {
       const response = await fetch("/api/protocols/publish", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: protocol.id })
+        body: JSON.stringify({ id: targetProtocolId })
       });
       
       if (!response.ok) {
@@ -197,16 +196,20 @@ export default function ProtocolsView({
       const resData = await response.json();
       
       // Update local status to published
-      const updated = protocols.map((item) => {
-        if (item.id === protocol.id) {
-          return {
-            ...item,
-            status: "published" as const
-          };
-        }
-        return item;
+      setProtocols((prev) => {
+        const updated = prev.map((item) => {
+          if (item.id === targetProtocolId) {
+            return {
+              ...item,
+              status: "published" as const,
+              notebookId: resData.notebookId,
+              notebookUrl: resData.notebookUrl
+            };
+          }
+          return item;
+        });
+        return updated;
       });
-      setProtocols(updated);
       
       // Update run steps to make "publish" succeeded
       setRunSteps((prevSteps) => {
@@ -222,13 +225,22 @@ export default function ProtocolsView({
         });
       });
       
-      alert(resData.message || "Протокол успешно опубликован!");
+      if (showNotification) {
+        alert(resData.message || "Протокол успешно опубликован!");
+      }
     } catch (err: any) {
       setError(err.message || String(err));
-      alert(`Ошибка при публикации: ${err.message || String(err)}`);
+      if (showNotification) {
+        alert(`Ошибка при публикации: ${err.message || String(err)}`);
+      }
     } finally {
       setIsPublishing(false);
     }
+  };
+
+  const handlePublishToOpenNotebook = async () => {
+    if (!protocol) return;
+    await publishProtocolDirectly(protocol.id, true);
   };
 
   const protocol = protocols.find((item) => item.id === selectedProtocolId);
@@ -287,27 +299,30 @@ export default function ProtocolsView({
   };
 
   const parseFileNameMetadata = (fileName: string) => {
-    const dotDmyRegex = /(\d{2})\.(\d{2})\.(\d{4})/;
-    const dashDmyRegex = /(\d{2})-(\d{2})-(\d{4})/;
-    const ymdRegex = /(\d{4})-(\d{2})-(\d{2})/;
+    const dotDmyRegex = /(\d{2})\.(\d{2})\.(\d{4}|\d{2})/;
+    const dashDmyRegex = /(\d{2})-(\d{2})-(\d{4}|\d{2})/;
+    const ymdRegex = /(\d{4}|\d{2})-(\d{2})-(\d{2})/;
     
     let dateStr = "";
     let displayDateStr = "";
     
     let match = fileName.match(dotDmyRegex);
     if (match) {
-      dateStr = `${match[3]}-${match[2]}-${match[1]}`;
-      displayDateStr = `${match[1]}.${match[2]}.${match[3]}`;
+      const year = match[3].length === 2 ? `20${match[3]}` : match[3];
+      dateStr = `${year}-${match[2]}-${match[1]}`;
+      displayDateStr = `${match[1]}.${match[2]}.${year}`;
     } else {
       match = fileName.match(dashDmyRegex);
       if (match) {
-        dateStr = `${match[3]}-${match[2]}-${match[1]}`;
-        displayDateStr = `${match[1]}.${match[2]}.${match[3]}`;
+        const year = match[3].length === 2 ? `20${match[3]}` : match[3];
+        dateStr = `${year}-${match[2]}-${match[1]}`;
+        displayDateStr = `${match[1]}.${match[2]}.${year}`;
       } else {
         match = fileName.match(ymdRegex);
         if (match) {
-          dateStr = match[0];
-          displayDateStr = `${match[3]}.${match[2]}.${match[1]}`;
+          const year = match[1].length === 2 ? `20${match[1]}` : match[1];
+          dateStr = `${year}-${match[2]}-${match[3]}`;
+          displayDateStr = `${match[3]}.${match[2]}.${year}`;
         }
       }
     }
@@ -445,22 +460,22 @@ export default function ProtocolsView({
     };
   };
 
-  const handleFieldChange = (fieldKey: keyof ProtocolRecord, value: string) => {
+  const handleFieldChange = (fieldKey: keyof ProtocolRecord, value: any) => {
     const updated = protocols.map((item) => {
       if (item.id === selectedProtocolId) {
         const updatedItem = { ...item };
         if (fieldKey === "participants") {
-          updatedItem.participants = value.split(",").map((p) => p.trim()).filter(Boolean);
+          updatedItem.participants = Array.isArray(value) ? value : String(value).split(",").map((p) => p.trim()).filter(Boolean);
         } else {
           Object.assign(updatedItem, { [fieldKey]: value });
         }
 
         if (fieldKey === "decisionsText") {
-          const lines = value.split("\n").map((l) => l.trim()).filter((l) => l.length > 0 && (l.startsWith("-") || l.startsWith("*") || /^\d+\./.test(l)));
+          const lines = String(value || "").split("\n").map((l: string) => l.trim()).filter((l: string) => l.length > 0 && (l.startsWith("-") || l.startsWith("*") || /^\d+\./.test(l)));
           updatedItem.decisions = lines.length;
         }
         if (fieldKey === "tasksText") {
-          const lines = value.split("\n").map((l) => l.trim()).filter((l) => l.length > 0 && (l.startsWith("-") || l.startsWith("*") || /^\d+\./.test(l)));
+          const lines = String(value || "").split("\n").map((l: string) => l.trim()).filter((l: string) => l.length > 0 && (l.startsWith("-") || l.startsWith("*") || /^\d+\./.test(l)));
           updatedItem.actionItems = lines.length;
         }
 
@@ -629,16 +644,27 @@ export default function ProtocolsView({
             return updated;
           });
 
+          const isAutoPublish = protocols.find((item) => item.id === targetProtocolId)?.saveToNotebook;
+
           setRunSteps([
             { id: "source", title: "Подготовка файла", description: "Файл успешно подготовлен и загружен в Google Cloud", status: "succeeded" },
             { id: "transcribe", title: "Подготовка стенограммы", description: "Стенограмма успешно подготовлена", status: "succeeded" },
             { id: "extract", title: "Подготовка протокола", description: "Протокол встречи подготовлен", status: "succeeded" },
-            { id: "publish", title: "Публикация в Open Notebook", description: "Ожидает публикации", status: "pending" }
+            { 
+              id: "publish", 
+              title: "Публикация в Open Notebook", 
+              description: isAutoPublish ? "Публикация в Open Notebook..." : "Ожидает публикации", 
+              status: isAutoPublish ? "running" as const : "pending" as const 
+            }
           ]);
 
           setSelectedFile(null);
           isDone = true;
           cleanupLocalStorage(targetProtocolId);
+
+          if (isAutoPublish) {
+            void publishProtocolDirectly(targetProtocolId, false);
+          }
         }
       }
     } catch (err) {
@@ -1044,7 +1070,7 @@ export default function ProtocolsView({
             </div>
 
             <div className="protocol-editor" style={{ display: "flex", flexDirection: "column", gap: "16px", overflowY: "auto", paddingRight: "4px" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1.2fr 0.8fr 1fr", gap: "12px", alignItems: "end" }}>
                 <label style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "13px", fontWeight: 700, color: "var(--text)" }}>
                   Название встречи
                   <input
@@ -1062,6 +1088,21 @@ export default function ProtocolsView({
                     onChange={(e) => handleFieldChange("date", e.target.value)}
                     style={{ padding: "10px", border: "1px solid var(--line)", borderRadius: "var(--border-radius)", background: "var(--bg-card)", color: "var(--text)" }}
                   />
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "13.5px", fontWeight: 600, color: "var(--text)", cursor: "pointer", height: "42px", alignSelf: "end" }}>
+                  <input
+                    type="checkbox"
+                    checked={protocol.saveToNotebook ?? false}
+                    onChange={(e) => handleFieldChange("saveToNotebook", e.target.checked)}
+                    style={{ 
+                      width: "18px", 
+                      height: "18px", 
+                      accentColor: "#10b981", 
+                      cursor: "pointer",
+                      borderRadius: "4px"
+                    }}
+                  />
+                  <span style={{ userSelect: "none" }}>Сохранять в Open Notebook</span>
                 </label>
               </div>
 
@@ -1706,6 +1747,32 @@ export default function ProtocolsView({
                                           <Eye size={12} />
                                           Превью
                                         </button>
+                                      )}
+                                    </div>
+                                  ) : step.id === "publish" ? (
+                                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                      {protocol.notebookUrl && (
+                                        <a 
+                                          href={protocol.notebookUrl} 
+                                          target="_blank" 
+                                          rel="noopener noreferrer" 
+                                          className="secondary-button" 
+                                          style={{ 
+                                            height: "32px", 
+                                            padding: "0 12px", 
+                                            fontSize: "12px", 
+                                            gap: "6px", 
+                                            display: "inline-flex", 
+                                            alignItems: "center", 
+                                            textDecoration: "none", 
+                                            background: "#e6f4ea", 
+                                            color: "#137333", 
+                                            borderColor: "#10b981" 
+                                          }}
+                                        >
+                                          <ExternalLink size={12} />
+                                          Открыть блокнот
+                                        </a>
                                       )}
                                     </div>
                                   ) : null

@@ -41,6 +41,7 @@ export interface RuntimeConfig {
   imageServiceApiKey?: string;
   storagePath: string;
   openNotebookApiUrl: string;
+  openNotebookWebUrl?: string;
   openNotebookPassword?: string;
   imageModel?: string;
   geminiModelAnalytics?: string;
@@ -112,6 +113,7 @@ export function getRuntimeConfig(env: NodeJS.ProcessEnv = process.env): RuntimeC
     imageServiceApiKey,
     storagePath: env.STORAGE_PATH ?? ".data/storage",
     openNotebookApiUrl: env.OPEN_NOTEBOOK_API_URL ?? "http://127.0.0.1:5055",
+    openNotebookWebUrl: env.OPEN_NOTEBOOK_WEB_URL || env.OPEN_NOTEBOOK_API_URL || "http://127.0.0.1:5055",
     openNotebookPassword: env.OPEN_NOTEBOOK_PASSWORD,
     imageModel,
     geminiModelAnalytics,

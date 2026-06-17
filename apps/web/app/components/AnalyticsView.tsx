@@ -31,7 +31,8 @@ import {
   Meh,
   Frown,
   X,
-  CheckCircle2
+  CheckCircle2,
+  ExternalLink
 } from "lucide-react";
 import { analyticsBlocks, latestAnalyticsRun } from "@tools/analytics";
 import type { ProcessRun } from "@tools/core";
@@ -70,6 +71,8 @@ interface SavedAnalyticsRun {
   useDay1Input: boolean;
   useDay1Output: boolean;
   useDay2: boolean;
+  notebookId?: string;
+  notebookUrl?: string;
 }
 
 interface AnalyticsViewProps {
@@ -542,12 +545,14 @@ export default function AnalyticsView({ promptSettings, activeRun, setActiveRun 
     setExecutionTimes(savedRun.stepDurations);
 
     const hasAnyReport = Object.keys(savedRun.accumulatedReports).length > 0;
-    if (hasAnyReport || savedRun.accumulatedImageUrl) {
+    if (hasAnyReport || savedRun.accumulatedImageUrl || savedRun.notebookUrl) {
       setRunResult({
         status: "ready",
         message: "Идет обработка шагов...",
         stageReports: savedRun.accumulatedReports,
-        infographicImageUrl: savedRun.accumulatedImageUrl
+        infographicImageUrl: savedRun.accumulatedImageUrl,
+        notebookId: savedRun.notebookId,
+        notebookUrl: savedRun.notebookUrl
       });
     }
 
@@ -597,6 +602,10 @@ export default function AnalyticsView({ promptSettings, activeRun, setActiveRun 
       }
       if (data.infographicImageUrl) {
         savedRun.accumulatedImageUrl = data.infographicImageUrl;
+      }
+      if (data.notebookId) {
+        savedRun.notebookId = data.notebookId;
+        savedRun.notebookUrl = data.notebookUrl || `https://notebook.3321616.ru/notebooks/${encodeURIComponent(data.notebookId)}`;
       }
 
       const duration = Math.max(1, Math.round((Date.now() - currentStepStart) / 1000));
@@ -662,7 +671,9 @@ export default function AnalyticsView({ promptSettings, activeRun, setActiveRun 
           reportMarkdown: finalReportMarkdown,
           infographicImageUrl: savedRun.accumulatedImageUrl,
           stageReports: savedRun.accumulatedReports,
-          stats: data.stats || undefined
+          stats: data.stats || undefined,
+          notebookId: savedRun.notebookId,
+          notebookUrl: savedRun.notebookUrl
         };
 
         setRunResult(finalResult);
@@ -1949,9 +1960,35 @@ export default function AnalyticsView({ promptSettings, activeRun, setActiveRun 
                             {formatTime(executionTimes[step.id])}
                           </span>
                         )}
-                        {isStepSucceeded && hasReport && step.id !== "publish" && (
+                        {isStepSucceeded && (hasReport || step.id === "publish") && (
                           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                            {isInfographicImage ? (
+                            {step.id === "publish" ? (
+                              <>
+                                {runResult?.notebookUrl && (
+                                  <a 
+                                    href={runResult.notebookUrl} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer" 
+                                    className="secondary-button" 
+                                    style={{ 
+                                      height: "36px", 
+                                      padding: "0 14px", 
+                                      fontSize: "13px", 
+                                      gap: "6px", 
+                                      display: "inline-flex", 
+                                      alignItems: "center", 
+                                      textDecoration: "none", 
+                                      background: "#e6f4ea", 
+                                      color: "#137333", 
+                                      borderColor: "#10b981" 
+                                    }}
+                                  >
+                                    <ExternalLink size={14} />
+                                    Открыть блокнот
+                                  </a>
+                                )}
+                              </>
+                            ) : isInfographicImage ? (
                               <>
                                 <a 
                                   href={runResult?.infographicImageUrl} 

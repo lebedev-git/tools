@@ -141,6 +141,19 @@ function getDb(): DatabaseSync {
     );
   `);
 
+  try {
+    db.exec("ALTER TABLE protocol_records ADD COLUMN notebook_id TEXT;");
+  } catch (_) {}
+  try {
+    db.exec("ALTER TABLE protocol_records ADD COLUMN notebook_url TEXT;");
+  } catch (_) {}
+  try {
+    db.exec("ALTER TABLE protocol_records ADD COLUMN meeting_format TEXT;");
+  } catch (_) {}
+  try {
+    db.exec("ALTER TABLE protocol_records ADD COLUMN save_to_notebook INTEGER DEFAULT 0;");
+  } catch (_) {}
+
   _db = db;
   return db;
 }
@@ -206,7 +219,11 @@ export function getProtocols(): ProtocolRecord[] {
       responsible: row.responsible ?? "",
       deadlines: row.deadlines ?? "",
       risks: row.risks ?? "",
-      attachments: row.attachments ?? ""
+      attachments: row.attachments ?? "",
+      notebookId: row.notebook_id ?? "",
+      notebookUrl: row.notebook_url ?? "",
+      meetingFormat: (row.meeting_format as "regular" | "free") || undefined,
+      saveToNotebook: row.save_to_notebook === 1
     }));
   } catch (err) {
     console.error("Failed to get protocols:", err);
@@ -221,8 +238,8 @@ export function saveProtocol(protocol: ProtocolRecord): void {
       INSERT INTO protocol_records (
         id, title, date, status, participants, action_items, decisions,
         transcript, theme, agenda, key_points, decisions_text, tasks_text,
-        responsible, deadlines, risks, attachments, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        responsible, deadlines, risks, attachments, notebook_id, notebook_url, meeting_format, save_to_notebook, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
         date = excluded.date,
@@ -240,6 +257,10 @@ export function saveProtocol(protocol: ProtocolRecord): void {
         deadlines = excluded.deadlines,
         risks = excluded.risks,
         attachments = excluded.attachments,
+        notebook_id = excluded.notebook_id,
+        notebook_url = excluded.notebook_url,
+        meeting_format = excluded.meeting_format,
+        save_to_notebook = excluded.save_to_notebook,
         updated_at = excluded.updated_at
     `);
     const updatedAt = new Date().toISOString();
@@ -261,6 +282,10 @@ export function saveProtocol(protocol: ProtocolRecord): void {
       protocol.deadlines || "",
       protocol.risks || "",
       protocol.attachments || "",
+      protocol.notebookId || null,
+      protocol.notebookUrl || null,
+      protocol.meetingFormat || null,
+      protocol.saveToNotebook ? 1 : 0,
       updatedAt
     );
   } catch (err) {

@@ -1,5 +1,5 @@
 import { getProtocols, saveProtocol } from "@tools/db";
-import { OpenNotebookClient } from "@tools/integrations";
+import { OpenNotebookClient, getRuntimeConfig } from "@tools/integrations";
 import type { ProtocolRecord } from "@tools/protocols";
 
 export async function POST(request: Request) {
@@ -33,8 +33,12 @@ export async function POST(request: Request) {
 
     // Publish to Open Notebook
     const notebookClient = new OpenNotebookClient();
-    const notebookName = "Протоколы встреч";
-    const notebookDesc = "Согласованные и опубликованные протоколы совещаний и рабочих встреч";
+    
+    const isRegular = protocol.meetingFormat === "regular";
+    const notebookName = isRegular ? "Регулярные протоколы" : "Протоколы встреч";
+    const notebookDesc = isRegular
+      ? "Регулярные протоколы совещаний"
+      : "Согласованные и опубликованные протоколы совещаний и рабочих встреч";
 
     // 1. Resolve notebook
     console.log(`Open Notebook: Resolving notebook "${notebookName}"...`);
@@ -46,27 +50,33 @@ export async function POST(request: Request) {
       : new Date().toLocaleDateString("ru-RU");
 
     // 2. Publish Protocol Document
-    const docTitle = `${displayDate} - ${protocol.title || "Протокол встречи"}`;
+    const docTitle = isRegular ? displayDate : `${displayDate} - ${protocol.title || "Протокол встречи"}`;
     console.log(`Open Notebook: Creating document "${docTitle}"...`);
     await notebookClient.createSource([notebookId], docTitle, protocol.theme, true, true);
 
-    // 3. Publish Transcript Document (if exists)
-    if (protocol.transcript && protocol.transcript.trim()) {
+    // 3. Publish Transcript Document (if exists and not regular)
+    if (!isRegular && protocol.transcript && protocol.transcript.trim()) {
       const transTitle = `${displayDate} - Стенограмма: ${protocol.title || "Встреча"}`;
       console.log(`Open Notebook: Creating transcript document "${transTitle}"...`);
       await notebookClient.createSource([notebookId], transTitle, protocol.transcript, true, true);
     }
 
+    const runtimeConfig = getRuntimeConfig();
+    const notebookUrl = `${runtimeConfig.openNotebookWebUrl || "https://notebook.3321616.ru"}/notebooks/${encodeURIComponent(notebookId)}`;
+
     // 4. Update status in database
     const updatedProtocol: ProtocolRecord = {
       ...protocol,
-      status: "published"
+      status: "published",
+      notebookId,
+      notebookUrl
     };
     saveProtocol(updatedProtocol);
 
     return Response.json({
       status: "published",
       notebookId,
+      notebookUrl,
       message: `Протокол успешно опубликован в блокнот "${notebookName}".`
     });
   } catch (error: any) {

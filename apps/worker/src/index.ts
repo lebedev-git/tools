@@ -777,6 +777,7 @@ async function processAnalyticsJob(jobId: number, payload: any) {
     const totalAnswers = inputContext.count + outputContext.count + (day2Context?.count ?? 0);
     const jobStageReports: Record<string, string> = {};
     let infographicImageUrl = "";
+    let notebookId: string | undefined = undefined;
     let llmStatus: "succeeded" | "skipped" = "skipped";
     const blocks = selectedBlocks ?? [];
 
@@ -1023,7 +1024,7 @@ async function processAnalyticsJob(jobId: number, payload: any) {
           const notebookDesc = `Аналитические отчеты стратегической сессии от ${formattedDate}`;
           
           console.log(`Open Notebook: Getting or creating notebook "${notebookName}"...`);
-          const notebookId = await notebookClient.getOrCreateNotebook(notebookName, notebookDesc);
+          notebookId = await notebookClient.getOrCreateNotebook(notebookName, notebookDesc);
           console.log(`Open Notebook: Notebook resolved with ID: ${notebookId}`);
 
           const reportsToPublish = [
@@ -1106,6 +1107,8 @@ async function processAnalyticsJob(jobId: number, payload: any) {
         day2Context,
         reportMarkdown,
         infographicImageUrl,
+        notebookId,
+        notebookUrl: notebookId ? `${process.env.OPEN_NOTEBOOK_WEB_URL || "https://notebook.3321616.ru"}/notebooks/${encodeURIComponent(notebookId)}` : undefined,
         stageReports: buildStageReports(payload, jobStageReports),
         message:
           (totalAnswers > 0 || blocks.includes("infographic-prompt") || blocks.includes("infographic-image"))

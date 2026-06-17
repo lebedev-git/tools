@@ -59,6 +59,8 @@ export interface AnalyticsRunResult {
     outputCount: number;
     day2Count?: number;
   };
+  notebookId?: string;
+  notebookUrl?: string;
 }
 
 export interface NpsBucketResult {

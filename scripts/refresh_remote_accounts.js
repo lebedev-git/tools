@@ -9,12 +9,11 @@ const SSH_CONFIG = {
   password: process.env.DEPLOY_PASSWORD || "Jp6ka7ZMjX5uC"
 };
 
-const REMOTE_APP_DIR = "/home/docker/lebedev-git-tools";
-
 conn.on("ready", () => {
   console.log("🔌 Connected to remote server.");
-  // Читаем логи image-service
-  const cmd = `cd ${REMOTE_APP_DIR} && echo "=== IMAGE SERVICE LOGS ===" && docker compose logs --tail=100 image-service`;
+  const testToken = "eyJ1c2VybmFtZSI6ImFkbWluIiwiZXhwIjoxNzgxNjkxMDA5OTAxfQ.kBtYWkBppJBcnLqKA3-krYlG2UMrTNHsVsWDbmN9NWA";
+  // Отправляем PUT запрос для принудительного обновления лимитов
+  const cmd = `curl -s -X PUT -H "Content-Type: application/json" -d '{"action": "refresh_limits"}' -b "session=${testToken}" http://127.0.0.1:3010/api/settings/keys`;
   conn.exec(cmd, (err, stream) => {
     if (err) throw err;
     let stdout = "";

@@ -9,12 +9,10 @@ const SSH_CONFIG = {
   password: process.env.DEPLOY_PASSWORD || "Jp6ka7ZMjX5uC"
 };
 
-const REMOTE_APP_DIR = "/home/docker/lebedev-git-tools";
-
 conn.on("ready", () => {
   console.log("🔌 Connected to remote server.");
-  // Читаем логи image-service
-  const cmd = `cd ${REMOTE_APP_DIR} && echo "=== IMAGE SERVICE LOGS ===" && docker compose logs --tail=100 image-service`;
+  // Проверяем, что видит контейнер tools-image-service внутри себя в файле /app/data/accounts.json
+  const cmd = `docker exec tools-image-service cat /app/data/accounts.json`;
   conn.exec(cmd, (err, stream) => {
     if (err) throw err;
     let stdout = "";

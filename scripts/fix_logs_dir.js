@@ -13,8 +13,7 @@ const REMOTE_APP_DIR = "/home/docker/lebedev-git-tools";
 
 conn.on("ready", () => {
   console.log("🔌 Connected to remote server.");
-  // Читаем логи image-service
-  const cmd = `cd ${REMOTE_APP_DIR} && echo "=== IMAGE SERVICE LOGS ===" && docker compose logs --tail=100 image-service`;
+  const cmd = `cd ${REMOTE_APP_DIR} && docker compose restart image-service && echo "✅ image-service restarted successfully!"`;
   conn.exec(cmd, (err, stream) => {
     if (err) throw err;
     let stdout = "";

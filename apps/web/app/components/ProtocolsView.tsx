@@ -22,6 +22,42 @@ import {
   type RunStep
 } from "../../lib/utils";
 
+function uploadWithProgress(
+  url: string,
+  formData: FormData,
+  onProgress: (pct: number) => void
+): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        const percentComplete = Math.round((event.loaded / event.total) * 100);
+        onProgress(percentComplete);
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText));
+        } catch (err) {
+          reject(new Error("Не удалось распарсить ответ сервера"));
+        }
+      } else {
+        reject(new Error(`Ошибка сервера: ${xhr.status}`));
+      }
+    };
+
+    xhr.onerror = () => {
+      reject(new Error("Ошибка сети при загрузке файла."));
+    };
+
+    xhr.send(formData);
+  });
+}
+
 export default function ProtocolsView({
   activeRun,
   setActiveRun,
@@ -782,7 +818,7 @@ export default function ProtocolsView({
         ? `\n\nСписок участников встречи для сопоставления спикеров: ${protocol.participants.join(", ")}.`
         : "");
       
-      let response;
+      let jobId;
       if (selectedFile) {
         const formData = new FormData();
         formData.append("file", selectedFile);
@@ -790,12 +826,28 @@ export default function ProtocolsView({
         formData.append("prompt", fullPromptText);
         formData.append("transcriptPrompt", fullTranscriptPromptText);
 
-        response = await fetch("/api/protocols/runs", {
-          method: "POST",
-          body: formData
-        });
+        const runInit = await uploadWithProgress(
+          "/api/protocols/runs",
+          formData,
+          (percent) => {
+            const adjustedProgress = 5 + Math.round(percent * 0.85);
+            setUploadProgress(adjustedProgress);
+            setProgressMessage(`Загрузка файла (${percent}%)...`);
+            
+            // Also update run steps description
+            setRunSteps((prev) =>
+              prev.map((s) => {
+                if (s.id === "source") {
+                  return { ...s, description: `Загрузка файла: ${percent}%...` };
+                }
+                return s;
+              })
+            );
+          }
+        );
+        jobId = runInit.jobId;
       } else {
-        response = await fetch("/api/protocols/runs", {
+        const response = await fetch("/api/protocols/runs", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -805,14 +857,12 @@ export default function ProtocolsView({
             transcriptPrompt: fullTranscriptPromptText
           })
         });
+        if (!response.ok) {
+          throw new Error(`Ошибка сервера: ${response.status}`);
+        }
+        const runInit = await response.json();
+        jobId = runInit.jobId;
       }
-
-      if (!response.ok) {
-        throw new Error(`Ошибка сервера: ${response.status}`);
-      }
-
-      const runInit = await response.json();
-      const { jobId } = runInit;
 
       localStorage.setItem(`active_protocol_job_id_${protocol.id}`, String(jobId));
       localStorage.setItem(`active_protocol_start_time_${protocol.id}`, String(Date.now()));

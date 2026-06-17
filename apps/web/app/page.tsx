@@ -39,6 +39,23 @@ export default function Home() {
   const [loginError, setLoginError] = useState("");
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
+  // Force HTTPS redirect on client-side if loaded over HTTP (except for localhost)
+  useEffect(() => {
+    if (
+      typeof window !== "undefined" &&
+      window.location.protocol === "http:" &&
+      window.location.hostname !== "localhost" &&
+      window.location.hostname !== "127.0.0.1"
+    ) {
+      window.location.replace(
+        "https://" +
+        window.location.host +
+        window.location.pathname +
+        window.location.search
+      );
+    }
+  }, []);
+
   // Register Service Worker and listen to PWA install prompt
   useEffect(() => {
     if ("serviceWorker" in navigator) {

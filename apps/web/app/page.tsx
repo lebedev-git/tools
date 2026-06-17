@@ -288,6 +288,16 @@ export default function Home() {
           flexShrink: 0
         }}>
           <div style={{ display: "flex", gap: "10px" }}>
+            {deferredPrompt && (
+              <button 
+                className="icon-button" 
+                style={{ border: "none", height: "36px", width: "36px" }} 
+                onClick={handleInstallClick} 
+                title="Установить приложение"
+              >
+                <Download size={18} />
+              </button>
+            )}
             <button className="icon-button" style={{ border: "none", height: "36px", width: "36px" }} onClick={() => setTheme(t => t === "light" ? "dark" : "light")} title="Переключить тему">
               {theme === "light" ? <Moon size={18} /> : <Sun size={18} />}
             </button>

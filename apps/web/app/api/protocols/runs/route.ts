@@ -1,6 +1,21 @@
 import { addJob } from "@tools/db";
 import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { existsSync } from "node:fs";
+import { join, dirname, isAbsolute } from "node:path";
+
+function findMonorepoRoot(): string {
+  let dir = process.cwd();
+  while (true) {
+    if (existsSync(join(dir, "pnpm-workspace.yaml"))) {
+      return dir;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) {
+      return process.cwd();
+    }
+    dir = parent;
+  }
+}
 
 export async function POST(request: Request) {
   const contentType = request.headers.get("content-type") || "";
@@ -40,7 +55,11 @@ export async function POST(request: Request) {
     let originalMime = "";
 
     if (file) {
-      const tempDir = join(process.cwd(), ".data", "temp");
+      const storagePath = process.env.STORAGE_PATH || ".data/storage";
+      const dataDir = isAbsolute(storagePath) 
+        ? dirname(storagePath) 
+        : join(findMonorepoRoot(), dirname(storagePath));
+      const tempDir = join(dataDir, "temp");
       await mkdir(tempDir, { recursive: true });
 
       originalMime = file.type || "application/octet-stream";

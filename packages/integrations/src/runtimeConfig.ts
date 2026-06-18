@@ -113,7 +113,10 @@ export function getRuntimeConfig(env: NodeJS.ProcessEnv = process.env): RuntimeC
     imageServiceApiKey,
     storagePath: env.STORAGE_PATH ?? ".data/storage",
     openNotebookApiUrl: env.OPEN_NOTEBOOK_API_URL ?? "http://127.0.0.1:5055",
-    openNotebookWebUrl: env.OPEN_NOTEBOOK_WEB_URL || env.OPEN_NOTEBOOK_API_URL || "http://127.0.0.1:5055",
+    // Public, browser-facing URL — must NOT fall back to the internal API host
+    // (e.g. http://open_notebook:5055), which is only reachable between containers
+    // and produces dead "open notebook" links.
+    openNotebookWebUrl: env.OPEN_NOTEBOOK_WEB_URL || "https://notebook.3321616.ru",
     openNotebookPassword: env.OPEN_NOTEBOOK_PASSWORD,
     imageModel,
     geminiModelAnalytics,

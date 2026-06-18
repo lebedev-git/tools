@@ -855,7 +855,7 @@ async function processAnalyticsJob(jobId: number, payload: any) {
             { role: "user", content: userPromptDay1 }
           ],
           temperature: 0.4,
-          maxTokens: 4096
+          maxTokens: 8192
         });
       }
 
@@ -875,7 +875,7 @@ async function processAnalyticsJob(jobId: number, payload: any) {
             { role: "user", content: userPromptDay2 }
           ],
           temperature: 0.4,
-          maxTokens: 4096
+          maxTokens: 8192
         });
       }
 
@@ -897,7 +897,7 @@ async function processAnalyticsJob(jobId: number, payload: any) {
             { role: "user", content: userPromptOverall }
           ],
           temperature: 0.4,
-          maxTokens: 4096
+          maxTokens: 8192
         });
       }
 
@@ -931,7 +931,7 @@ async function processAnalyticsJob(jobId: number, payload: any) {
             { role: "user", content: userPromptProducts }
           ],
           temperature: 0.4,
-          maxTokens: 4096
+          maxTokens: 8192
         });
       }
 
@@ -947,7 +947,7 @@ async function processAnalyticsJob(jobId: number, payload: any) {
             { role: "user", content: `Данные аналитического отчета сессии для заполнения шаблона:\n\n${reportContext}` }
           ],
           temperature: 0.4,
-          maxTokens: 4096
+          maxTokens: 8192
         });
 
         jobStageReports["infographic-prompt"] = visualPrompt;
@@ -990,7 +990,7 @@ async function processAnalyticsJob(jobId: number, payload: any) {
               { role: "user", content: `Данные аналитического отчета сессии для заполнения шаблона:\n\n${reportContext}` }
             ],
             temperature: 0.4,
-            maxTokens: 4096
+            maxTokens: 8192
           });
 
           const basePrompt = stagePrompts?.infographicImage || "Создай красивую бизнес-инфографику на основе предоставленной разметки. Стиль: современный, чистый, корпоративный. Цвета должны гармонировать с логотипом. Размести логотип и фотографии участников в подходящих местах.";
@@ -1046,9 +1046,11 @@ async function processAnalyticsJob(jobId: number, payload: any) {
           jobStageReports.publish = `Успешно опубликовано ${uploadCount} отчетов в Open Notebook (Блокнот ID: ${notebookId})`;
           console.log(`Open Notebook: Successfully published ${uploadCount} reports.`);
         } catch (publishError: any) {
+          // Best-effort: a publish failure must NOT discard already-generated
+          // analytics reports. Record the error and continue so the job still
+          // succeeds and the reports are saved.
           console.error("Failed to publish to Open Notebook:", publishError);
           jobStageReports.publish = `Ошибка публикации в Open Notebook: ${publishError.message || publishError}`;
-          throw publishError;
         }
       }
 

@@ -87,8 +87,17 @@ export class YandexFormsClient {
 
   public async getAnswers(formId: string): Promise<YandexFormAnswersResponse> {
     if (!this.config.yandexFormsAuthHeaderValue) {
-      console.warn("Yandex Forms OAuth token missing, returning mock answers for development.");
-      return this.getMockAnswers(formId);
+      // Mock data is only acceptable in explicit dev mode. In production, silently
+      // returning fabricated answers would build a real report on fake data — fail
+      // loudly instead so the misconfiguration (or missing manual data) is visible.
+      if (process.env.ALLOW_MOCK_FORMS === "true") {
+        console.warn("Yandex Forms OAuth token missing, returning MOCK answers (ALLOW_MOCK_FORMS=true).");
+        return this.getMockAnswers(formId);
+      }
+      throw new Error(
+        "Yandex Forms не настроен: отсутствует OAuth-токен (YANDEX_FORMS_TOKEN). " +
+        "Введите данные форм вручную в интерфейсе или задайте токен в окружении."
+      );
     }
 
     const controller = new AbortController();

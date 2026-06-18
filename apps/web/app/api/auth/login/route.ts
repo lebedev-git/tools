@@ -28,7 +28,8 @@ export async function POST(request: Request) {
         path: "/",
         sameSite: "lax",
         maxAge: 86400,
-        secure: false
+        // Secure in production (served over HTTPS); off in local dev (http://localhost).
+        secure: process.env.NODE_ENV === "production"
       });
 
       return Response.json({ status: "success", authenticated: true });

@@ -58,7 +58,8 @@ export async function POST(request: Request) {
 
     // 3. Publish Transcript Document (if exists and not regular)
     if (!isRegular && protocol.transcript && protocol.transcript.trim()) {
-      const transTitle = `${displayDate} - Стенограмма: ${protocol.title || "Встреча"}`;
+      // protocol.title already contains the date, so don't prefix it again.
+      const transTitle = `Стенограмма: ${protocol.title?.trim() || `Встреча от ${displayDate}`}`;
       console.log(`Open Notebook: Creating transcript document "${transTitle}"...`);
       await notebookClient.createSource([notebookId], transTitle, protocol.transcript, true, true);
     }

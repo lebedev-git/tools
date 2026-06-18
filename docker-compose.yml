@@ -10,6 +10,14 @@ services:
       - .env
     environment:
       - PORT=3000
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+    labels:
+      - autoheal=true
     volumes:
       - shared-data:/app/.data
       - ./image-service-data:/app/image-service-data
@@ -31,6 +39,14 @@ services:
       - .env
     environment:
       - IMAGE_SERVICE_URL=http://image-service:80/v1
+    healthcheck:
+      test: ["CMD", "node", "-e", "const fs=require('fs');try{const t=parseInt(fs.readFileSync('/app/.data/worker.heartbeat','utf8'),10);process.exit(Date.now()-t<90000?0:1)}catch(e){process.exit(1)}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    labels:
+      - autoheal=true
     volumes:
       - shared-data:/app/.data
     networks:
@@ -51,6 +67,18 @@ services:
       - ./image-service-data:/app/data
     networks:
       - default
+
+  # Restarts any container marked `autoheal=true` once Docker reports it unhealthy
+  # (plain restart:always only reacts to a process exit, not a hung-but-running one).
+  autoheal:
+    image: willfarrell/autoheal:latest
+    restart: always
+    environment:
+      - AUTOHEAL_CONTAINER_LABEL=autoheal
+      - AUTOHEAL_INTERVAL=30
+      - AUTOHEAL_START_PERIOD=60
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 
 volumes:
   shared-data:

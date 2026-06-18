@@ -1131,7 +1131,19 @@ async function processAnalyticsJob(jobId: number, payload: any) {
 
 async function workerLoop() {
   console.log("=== Background Worker Started ===");
-  
+
+  // Liveness heartbeat for the Docker healthcheck. Uses a timer (not the loop)
+  // so it keeps ticking while the loop is awaiting a long job — async ffmpeg /
+  // Deepgram leave the event loop free, so a fresh heartbeat means "process is
+  // alive". A truly hung (event-loop-blocked) worker goes stale and autoheal
+  // restarts it; a legitimately busy worker stays healthy.
+  const heartbeatPath = join(process.cwd(), ".data", "worker.heartbeat");
+  const writeHeartbeat = () => {
+    try { writeFileSync(heartbeatPath, String(Date.now())); } catch { /* ignore */ }
+  };
+  writeHeartbeat();
+  setInterval(writeHeartbeat, 15000);
+
   // Run stale job reaper on startup
   reapStaleJobs(true);
   

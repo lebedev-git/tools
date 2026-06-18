@@ -76,6 +76,9 @@ function getDb(): DatabaseSync {
   
   // Enable WAL mode for better concurrency handling
   db.exec("PRAGMA journal_mode = WAL;");
+  // web and worker share this DB; wait up to 5s on a locked writer instead of
+  // throwing SQLITE_BUSY immediately.
+  db.exec("PRAGMA busy_timeout = 5000;");
   db.exec("PRAGMA foreign_keys = ON;");
 
   // Create tables
@@ -164,7 +167,10 @@ export function getPrompt(key: string, defaultValue: string): string {
     const db = getDb();
     const query = db.prepare("SELECT value FROM prompt_settings WHERE key = ?");
     const result = query.get(key) as { value: string } | undefined;
-    return result ? result.value : defaultValue;
+    // Treat an existing-but-empty value as "unset" and fall back to the default.
+    // Otherwise blank rows saved by the settings UI (e.g. config.deepgram_model="")
+    // override real defaults and break clients (empty model => provider 403).
+    return result && result.value.trim() ? result.value : defaultValue;
   } catch (err) {
     console.error(`Failed to get prompt ${key}:`, err);
     return defaultValue;

@@ -12,3 +12,5 @@ scratch
 project.tar.gz
 image-service-data/
 
+apps/web/public/ffmpeg/
+apps/web/.test-assets/

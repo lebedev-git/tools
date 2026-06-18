@@ -820,8 +820,42 @@ export default function ProtocolsView({
       
       let jobId;
       if (selectedFile) {
+        // Shrink media to 16 kHz mono mp3 in the browser before upload. The
+        // worker downsamples to this anyway, so we send ~5 MB instead of a
+        // multi-hundred-MB video — uploads go from minutes to seconds. Any
+        // failure falls back to uploading the original file unchanged.
+        let fileToUpload: File = selectedFile;
+        const alreadySmallAudio =
+          selectedFile.type.startsWith("audio/") && selectedFile.size < 15 * 1024 * 1024;
+        if (!alreadySmallAudio) {
+          try {
+            setUploadProgress(0);
+            setProgressMessage("Сжатие аудио в браузере...");
+            setRunSteps((prev) =>
+              prev.map((s) =>
+                s.id === "source"
+                  ? { ...s, status: "running" as const, description: "Извлечение аудиодорожки в браузере..." }
+                  : s
+              )
+            );
+            const { extractAudioMp3 } = await import("@/lib/ffmpegAudio");
+            const compressed = await extractAudioMp3(selectedFile, {
+              onProgress: (ratio) => {
+                const pct = Math.round(ratio * 100);
+                setUploadProgress(pct);
+                setProgressMessage(`Сжатие аудио в браузере (${pct}%)...`);
+              },
+            });
+            if (compressed.size > 0 && compressed.size < selectedFile.size) {
+              fileToUpload = compressed;
+            }
+          } catch (err) {
+            console.warn("Локальное сжатие аудио не удалось, отправляю оригинал:", err);
+          }
+        }
+
         const formData = new FormData();
-        formData.append("file", selectedFile);
+        formData.append("file", fileToUpload);
         formData.append("protocolId", protocol.id);
         formData.append("prompt", fullPromptText);
         formData.append("transcriptPrompt", fullTranscriptPromptText);

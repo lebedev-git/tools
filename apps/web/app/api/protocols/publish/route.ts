@@ -50,7 +50,9 @@ export async function POST(request: Request) {
       : new Date().toLocaleDateString("ru-RU");
 
     // 2. Publish Protocol Document
-    const docTitle = isRegular ? displayDate : `${displayDate} - ${protocol.title || "Протокол встречи"}`;
+    // protocol.title is already "Протокол встречи от <дата>", so don't prefix the
+    // date again (that produced "17.06.2026 - Протокол встречи от 17.06.2026").
+    const docTitle = isRegular ? displayDate : (protocol.title?.trim() || `Протокол встречи от ${displayDate}`);
     console.log(`Open Notebook: Creating document "${docTitle}"...`);
     await notebookClient.createSource([notebookId], docTitle, protocol.theme, true, true);
 

@@ -22,6 +22,12 @@ import {
   type RunStep
 } from "../../lib/utils";
 
+// Module-level cache so re-entering the Protocols tab (the component is
+// recreated by page.tsx on every section switch) shows the already-loaded
+// protocols immediately instead of flashing the "Загрузка протокола..." placeholder.
+let cachedProtocols: ProtocolRecord[] | null = null;
+let cachedSelectedProtocolId: string | null = null;
+
 function uploadWithProgress(
   url: string,
   formData: FormData,
@@ -67,8 +73,8 @@ export default function ProtocolsView({
   setActiveRun: Dispatch<SetStateAction<ProcessRun>>;
   promptSettings: Record<string, string>;
 }) {
-  const [protocols, setProtocols] = useState<ProtocolRecord[]>([]);
-  const [selectedProtocolId, setSelectedProtocolId] = useState("");
+  const [protocols, setProtocols] = useState<ProtocolRecord[]>(cachedProtocols ?? []);
+  const [selectedProtocolId, setSelectedProtocolId] = useState(cachedSelectedProtocolId ?? "");
   const [isGenerating, setIsGenerating] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -194,13 +200,22 @@ export default function ProtocolsView({
           });
         }
         setProtocols(list);
-        setSelectedProtocolId(list[0]?.id || "default-protocol");
+        cachedProtocols = list;
+        setSelectedProtocolId((prev) => prev || list[0]?.id || "default-protocol");
       } catch (err) {
         console.error("Failed to load protocols:", err);
       }
     }
     void loadProtocols();
   }, []);
+
+  // Keep the module-level cache in sync so a remount renders instantly.
+  useEffect(() => {
+    if (protocols.length > 0) cachedProtocols = protocols;
+  }, [protocols]);
+  useEffect(() => {
+    if (selectedProtocolId) cachedSelectedProtocolId = selectedProtocolId;
+  }, [selectedProtocolId]);
 
   const saveProtocols = async (updatedList: ProtocolRecord[]) => {
     try {

@@ -80,7 +80,7 @@ export function getRuntimeConfig(env: NodeJS.ProcessEnv = process.env): RuntimeC
   const deepgramApiKey = [baseDeepgram, extraDeepgram].map(k => k.trim()).filter(Boolean).join(",");
 
   const llmModel = getPrompt("config.llm_model", env.LLM_MODEL ?? "qwen3.7-max");
-  const deepgramModel = getPrompt("config.deepgram_model", env.DEEPGRAM_MODEL ?? "nova-2");
+  const deepgramModel = getPrompt("config.deepgram_model", env.DEEPGRAM_MODEL ?? "nova-3");
 
   const geminiModelAnalytics = getPrompt("config.gemini_model_analytics", "gemini-2.5-flash");
   const geminiModelProtocols = getPrompt("config.gemini_model_protocols", "gemini-2.5-flash");

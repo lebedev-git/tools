@@ -57,7 +57,7 @@ export class DeepgramClient {
     delay = 3000
   ): Promise<DeepgramTranscriptionResult> {
     const apiKey = this.getApiKey();
-    const model = opts.model ?? this.config.deepgramModel ?? "nova-2";
+    const model = opts.model ?? this.config.deepgramModel ?? "nova-3";
     const language = opts.language ?? "ru";
 
     const params = new URLSearchParams({

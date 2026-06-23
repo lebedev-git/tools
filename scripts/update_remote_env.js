@@ -13,7 +13,7 @@ const REMOTE_APP_DIR = process.env.DEPLOY_PATH || "/home/docker/lebedev-git-tool
 
 const KEY_TO_ADD = `
 DEEPGRAM_API_KEY=1afd20dc654a4528b978feadd6c40a81d1c70d9d
-DEEPGRAM_MODEL=nova-2
+DEEPGRAM_MODEL=nova-3
 `;
 
 function executeCommand(conn, cmd) {

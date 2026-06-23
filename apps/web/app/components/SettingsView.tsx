@@ -526,7 +526,7 @@ export default function SettingsView({ workspace }: { workspace: "analytics" | "
                   type="text" 
                   value={deepgramModel} 
                   onChange={(e) => setDeepgramModel(e.target.value)} 
-                  placeholder="Например, nova-2"
+                  placeholder="Например, nova-3"
                   style={{ padding: "10px", border: "1px solid var(--line)", borderRadius: "var(--border-radius)" }}
                 />
               </label>

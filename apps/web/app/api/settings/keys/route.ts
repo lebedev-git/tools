@@ -59,7 +59,7 @@ export async function GET() {
       llmModelDefault: env.LLM_MODEL ?? "qwen3.7-max",
       geminiApiKeysMasked: splitKeys(env.GEMINI_API_KEY).map(maskSingleKey),
       deepgramApiKeysMasked: splitKeys(env.DEEPGRAM_API_KEY).map(maskSingleKey),
-      deepgramModelDefault: env.DEEPGRAM_MODEL ?? "nova-2",
+      deepgramModelDefault: env.DEEPGRAM_MODEL ?? "nova-3",
       imageServiceUrlDefault: env.IMAGE_SERVICE_URL ?? "http://automation-codex-service:3007/codex-internal",
       imageServiceApiKeyMasked: maskSingleKey(env.IMAGE_SERVICE_API_KEY ?? "")
     };

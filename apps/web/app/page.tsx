@@ -6,11 +6,9 @@ import {
   ClipboardList,
   Download,
   LayoutDashboard,
-  Moon,
   PanelLeftClose,
   PanelLeftOpen,
   Sparkles,
-  Sun,
   User,
   Settings
 } from "lucide-react";
@@ -30,7 +28,6 @@ export default function Home() {
   const [promptSettings, setPromptSettings] = useState<Record<string, string>>(promptDefaults);
   const [activeAnalyticsRun, setActiveAnalyticsRun] = useState<ProcessRun>(latestAnalyticsRun);
   const [activeProtocolRun, setActiveProtocolRun] = useState<ProcessRun>(latestProtocolRun);
-  const [theme, setTheme] = useState<"light" | "dark">("light");
 
   // Authentication states
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
@@ -115,15 +112,6 @@ export default function Home() {
     }
   }, []);
 
-  // Handle dark mode class on document element
-  useEffect(() => {
-    if (theme === "dark") {
-      document.documentElement.classList.add("dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-    }
-  }, [theme]);
-
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -145,8 +133,12 @@ export default function Home() {
     }
   };
 
-  // Load custom saved prompts on start
+  // Load custom saved prompts once authenticated. Fetching before auth would
+  // hit the protected endpoint and log a 401 in the console.
   useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
     let mounted = true;
     async function loadPrompts() {
       try {
@@ -168,7 +160,7 @@ export default function Home() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [isAuthenticated]);
 
   const activeView = useMemo(() => {
     if (section === "protocols") {
@@ -315,9 +307,6 @@ export default function Home() {
                 <Download size={18} />
               </button>
             )}
-            <button className="icon-button" style={{ border: "none", height: "36px", width: "36px" }} onClick={() => setTheme(t => t === "light" ? "dark" : "light")} title="Переключить тему">
-              {theme === "light" ? <Moon size={18} /> : <Sun size={18} />}
-            </button>
             <button className="icon-button" style={{ border: "none", height: "36px", width: "36px" }} title="Профиль">
               <User size={18} />
             </button>

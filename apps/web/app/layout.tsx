@@ -4,7 +4,14 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Tools Platform",
   description: "Analytics and protocol tools platform",
-  manifest: "/manifest.json"
+  manifest: "/manifest.json",
+  // Use the brand logo as the favicon so the browser stops requesting a
+  // non-existent /favicon.ico (which 404s).
+  icons: {
+    icon: "/logo.png",
+    shortcut: "/logo.png",
+    apple: "/logo.png"
+  }
 };
 
 interface RootLayoutProps {

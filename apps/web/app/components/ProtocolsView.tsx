@@ -1921,25 +1921,46 @@ export default function ProtocolsView({
                                 </div>
                                 
                                 {step.id === "transcribe" ? (
-                                  <textarea
-                                    style={{
-                                      padding: "16px",
-                                      background: "#ffffff",
-                                      borderRadius: "8px",
-                                      border: "1px solid var(--line)",
-                                      fontSize: "13px",
-                                      lineHeight: "1.6",
-                                      minHeight: "400px",
-                                      maxHeight: "600px",
-                                      width: "100%",
-                                      color: "var(--text)",
-                                      fontFamily: "monospace",
-                                      resize: "vertical"
-                                    }}
-                                    value={protocol.transcript || ""}
-                                    onChange={(e) => handleFieldChange("transcript", e.target.value)}
-                                    placeholder="Стенограмма пуста. Введите текст стенограммы вручную или загрузите файл записи встречи."
-                                  />
+                                  <>
+                                    {/(^|\n)\s*Спикер \d+:/.test(protocol.transcript || "") && (
+                                      <div
+                                        style={{
+                                          marginBottom: "12px",
+                                          padding: "10px 14px",
+                                          background: "#fff7ed",
+                                          border: "1px solid #fed7aa",
+                                          borderRadius: "8px",
+                                          fontSize: "12.5px",
+                                          lineHeight: "1.5",
+                                          color: "#9a3412"
+                                        }}
+                                      >
+                                        Голоса разделены автоматически, но имена участников не подставлены —
+                                        спикеры помечены как «Спикер 0/1…». Это не ошибка распознавания: имена
+                                        не удалось сопоставить по содержанию реплик. При необходимости
+                                        переименуйте их прямо в тексте ниже.
+                                      </div>
+                                    )}
+                                    <textarea
+                                      style={{
+                                        padding: "16px",
+                                        background: "#ffffff",
+                                        borderRadius: "8px",
+                                        border: "1px solid var(--line)",
+                                        fontSize: "13px",
+                                        lineHeight: "1.6",
+                                        minHeight: "400px",
+                                        maxHeight: "600px",
+                                        width: "100%",
+                                        color: "var(--text)",
+                                        fontFamily: "monospace",
+                                        resize: "vertical"
+                                      }}
+                                      value={protocol.transcript || ""}
+                                      onChange={(e) => handleFieldChange("transcript", e.target.value)}
+                                      placeholder="Стенограмма пуста. Введите текст стенограммы вручную или загрузите файл записи встречи."
+                                    />
+                                  </>
                                 ) : (
                                   <div
                                     style={{

@@ -1,0 +1,7 @@
+name = "gemini-proxy"
+main = "worker.js"
+compatibility_date = "2026-06-01"
+
+# PROXY_SECRET is set as a secret, not here:
+#   wrangler secret put PROXY_SECRET
+# (see README.md)

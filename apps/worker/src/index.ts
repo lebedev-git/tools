@@ -202,7 +202,11 @@ async function mapSpeakersToNames(
   config: RuntimeConfig
 ): Promise<string> {
   const ctx = (participantContext || "").trim();
-  if (!ctx || !config.llmApiKey) {
+  // Guard on the key actually used below (GeminiClient → Gemini protocols key),
+  // not the unrelated LLM provider key. Otherwise removing LLM_API_KEY would
+  // silently disable name mapping even though the Gemini key is present.
+  const geminiKey = config.geminiApiKeyProtocols || config.geminiApiKey;
+  if (!ctx || !geminiKey) {
     return diarizedText;
   }
 

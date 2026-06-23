@@ -69,12 +69,12 @@ export class GeminiClient {
         if (is429 || is503 || isAuthError) {
           this.rotateKey(keys);
         }
-        
-        let nextModel = activeModel;
-        if ((is503 || is429) && activeModel === "gemini-2.5-flash") {
-          console.warn(`Gemini model ${activeModel} overloaded or rate-limited. Falling back to gemini-2.0-flash.`);
-          nextModel = "gemini-2.0-flash";
-        }
+
+        // NOTE: we intentionally do NOT fall back to gemini-2.0-flash here.
+        // On the free tier 2.0-flash often has a hard daily cap (429 "limit: 0"),
+        // so falling back to it turns a transient 2.5-flash 429/503 into a fatal
+        // dead-end. Retrying the same (working) model with backoff is more robust.
+        const nextModel = activeModel;
 
         console.warn(`Gemini API operation failed. Retrying in ${delay}ms... (${retries} attempts left). Error: ${error.message}`);
         await new Promise((resolve) => setTimeout(resolve, delay));

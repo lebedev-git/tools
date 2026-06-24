@@ -83,6 +83,9 @@ export default function ProtocolsView({
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [openPreviews, setOpenPreviews] = useState<Record<string, boolean>>({});
   const [copiedStepId, setCopiedStepId] = useState<string | null>(null);
+  // Draft speaker-label renames in the transcript preview: { "Спикер 0": "Оля", ... }
+  const [speakerRenames, setSpeakerRenames] = useState<Record<string, string>>({});
+  const [isApplyingRenames, setIsApplyingRenames] = useState(false);
   const togglePreview = (stepId: string) => {
     setOpenPreviews((prev) => ({ ...prev, [stepId]: !prev[stepId] }));
   };
@@ -354,6 +357,54 @@ export default function ProtocolsView({
       setProtocols(updated);
       void saveProtocols(updated);
     }
+  };
+
+  // Distinct speaker labels at the start of a line in the transcript, e.g.
+  // ["Спикер 0", "Оля", "Спикер 2"] — includes both unresolved generic labels
+  // and names the AI already filled in (so the user can correct any of them).
+  const speakerLabels = useMemo(() => {
+    const text = protocol?.transcript || "";
+    const matches = [...text.matchAll(/(?:^|\n)\s*([^\n:]{1,60}?):\s/g)].map((m) => m[1].trim());
+    return Array.from(new Set(matches.filter(Boolean)));
+  }, [protocol?.transcript]);
+
+  const hasUnresolvedSpeakers = useMemo(
+    () => speakerLabels.some((l) => /^Спикер\s*\d+$/i.test(l)),
+    [speakerLabels]
+  );
+
+  // Replaces edited speaker labels throughout the transcript, saves it, and
+  // regenerates the protocol from the corrected text. Reuses the existing
+  // no-file handleRegenerate path — no audio re-processing, no worker changes.
+  const applySpeakerRenames = async () => {
+    if (!protocol) return;
+    let newTranscript = protocol.transcript || "";
+    let changed = false;
+
+    for (const [original, renamedRaw] of Object.entries(speakerRenames)) {
+      const renamed = (renamedRaw || "").trim();
+      if (!renamed || renamed === original) continue;
+      // Replace "<label>:" only at the start of a line to avoid touching prose.
+      const escaped = original.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const re = new RegExp(`(^|\\n)\\s*${escaped}:`, "g");
+      newTranscript = newTranscript.replace(re, `$1${renamed}:`);
+      changed = true;
+    }
+
+    if (!changed) return;
+
+    setIsApplyingRenames(true);
+    // Persist the corrected transcript first so it survives the regenerate reset.
+    const withTranscript = protocols.map((item) =>
+      item.id === selectedProtocolId ? { ...item, transcript: newTranscript } : item
+    );
+    setProtocols(withTranscript);
+    await saveProtocols(withTranscript);
+    setSpeakerRenames({});
+    setIsApplyingRenames(false);
+
+    // Regenerate the protocol from the corrected transcript (no audio re-run).
+    await handleRegenerate(newTranscript);
   };
 
   const parseFileNameMetadata = (fileName: string) => {
@@ -752,7 +803,7 @@ export default function ProtocolsView({
     }
   }, [selectedProtocolId, protocol]);
 
-  const handleRegenerate = async () => {
+  const handleRegenerate = async (transcriptOverride?: string) => {
     if (!protocol) return;
 
     setProtocols((prev) =>
@@ -909,7 +960,7 @@ export default function ProtocolsView({
           body: JSON.stringify({
             protocolId: protocol.id,
             prompt: fullPromptText,
-            transcript: protocol.transcript,
+            transcript: transcriptOverride ?? protocol.transcript,
             transcriptPrompt: fullTranscriptPromptText
           })
         });
@@ -1663,7 +1714,7 @@ export default function ProtocolsView({
                   type="button"
                   className="primary-button"
                   disabled={isGenerating || (!selectedFile && !(protocol?.transcript && protocol.transcript.trim()))}
-                  onClick={handleRegenerate}
+                  onClick={() => void handleRegenerate()}
                   style={{ 
                     flex: 1,
                     height: "46px", 
@@ -1943,23 +1994,82 @@ export default function ProtocolsView({
                                 
                                 {step.id === "transcribe" ? (
                                   <>
-                                    {/(^|\n)\s*Спикер \d+:/.test(protocol.transcript || "") && (
+                                    {speakerLabels.length > 0 && (
                                       <div
                                         style={{
                                           marginBottom: "12px",
-                                          padding: "10px 14px",
-                                          background: "#fff7ed",
-                                          border: "1px solid #fed7aa",
-                                          borderRadius: "8px",
-                                          fontSize: "12.5px",
-                                          lineHeight: "1.5",
-                                          color: "#9a3412"
+                                          padding: "14px 16px",
+                                          background: hasUnresolvedSpeakers ? "#fff7ed" : "#f0fdf4",
+                                          border: `1px solid ${hasUnresolvedSpeakers ? "#fed7aa" : "#bbf7d0"}`,
+                                          borderRadius: "8px"
                                         }}
                                       >
-                                        Голоса разделены автоматически, но имена участников не подставлены —
-                                        спикеры помечены как «Спикер 0/1…». Это не ошибка распознавания: имена
-                                        не удалось сопоставить по содержанию реплик. При необходимости
-                                        переименуйте их прямо в тексте ниже.
+                                        <div style={{ fontSize: "12.5px", lineHeight: "1.5", color: hasUnresolvedSpeakers ? "#9a3412" : "#166534", marginBottom: "10px" }}>
+                                          {hasUnresolvedSpeakers
+                                            ? "Голоса разделены автоматически, но не для всех спикеров удалось подставить имена. Впишите имена ниже — они заменятся по всей стенограмме, и протокол пересоберётся."
+                                            : "Имена спикеров подставлены автоматически. При необходимости отредактируйте их ниже — изменения применятся ко всей стенограмме, и протокол пересоберётся."}
+                                        </div>
+                                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "8px" }}>
+                                          {speakerLabels.map((label) => {
+                                            const isGeneric = /^Спикер\s*\d+$/i.test(label);
+                                            return (
+                                              <div key={label} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                                <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--muted)", minWidth: "72px", whiteSpace: "nowrap" }}>
+                                                  {label}
+                                                </span>
+                                                <span style={{ color: "var(--muted)" }}>→</span>
+                                                <input
+                                                  type="text"
+                                                  value={speakerRenames[label] ?? (isGeneric ? "" : label)}
+                                                  onChange={(e) => setSpeakerRenames((prev) => ({ ...prev, [label]: e.target.value }))}
+                                                  placeholder={isGeneric ? "Имя участника" : label}
+                                                  disabled={isApplyingRenames || isGenerating}
+                                                  style={{
+                                                    flex: 1,
+                                                    padding: "6px 10px",
+                                                    fontSize: "12.5px",
+                                                    border: "1px solid var(--line, #cbd5e1)",
+                                                    borderRadius: "6px",
+                                                    background: "#ffffff",
+                                                    color: "var(--text)"
+                                                  }}
+                                                />
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => void applySpeakerRenames()}
+                                          disabled={
+                                            isApplyingRenames ||
+                                            isGenerating ||
+                                            !Object.entries(speakerRenames).some(([k, v]) => (v || "").trim() && v.trim() !== k)
+                                          }
+                                          style={{
+                                            marginTop: "12px",
+                                            padding: "8px 16px",
+                                            fontSize: "13px",
+                                            fontWeight: 600,
+                                            color: "#ffffff",
+                                            background: "#10b981",
+                                            border: "none",
+                                            borderRadius: "8px",
+                                            cursor: "pointer",
+                                            display: "inline-flex",
+                                            alignItems: "center",
+                                            gap: "8px",
+                                            opacity:
+                                              isApplyingRenames ||
+                                              isGenerating ||
+                                              !Object.entries(speakerRenames).some(([k, v]) => (v || "").trim() && v.trim() !== k)
+                                                ? 0.5
+                                                : 1
+                                          }}
+                                        >
+                                          {(isApplyingRenames || isGenerating) ? <Loader2 size={14} className="spin" /> : <CheckCircle2 size={14} />}
+                                          Применить имена и пересобрать протокол
+                                        </button>
                                       </div>
                                     )}
                                     <textarea

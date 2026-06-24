@@ -91,6 +91,10 @@ export default function ProtocolsView({
   const [protocolTotalTime, setProtocolTotalTime] = useState(0);
   const [protocolExecutionTimes, setProtocolExecutionTimes] = useState<Record<string, number>>({});
   const protocolStageRef = useRef("");
+  // Ref to the hidden <input type="file">. We must clear its .value on reset /
+  // after selecting a file, otherwise re-picking the SAME file fires no change
+  // event (the browser sees an unchanged value) and the upload silently fails.
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const dbParticipants = useMemo(() => ["Антон Актуганов", "Андрей Лебедев", "Софья Колесникова"], []);
 
@@ -318,7 +322,10 @@ export default function ProtocolsView({
     setHasRunStarted(false);
     setProtocolTotalTime(0);
     setProtocolExecutionTimes({});
-    
+    // Clear the file input so the user can re-select the same file afterwards.
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
     if (protocol) {
       const updated = protocols.map((item) => {
         if (item.id === selectedProtocolId) {
@@ -1581,9 +1588,9 @@ export default function ProtocolsView({
                   <span style={{ fontSize: "13.5px", fontWeight: 700, color: "var(--text, #0f172a)", display: "flex", alignItems: "center", gap: "6px" }}>
                     🎙️ Запись встречи
                   </span>
-                  <div 
-                    style={{ 
-                      border: "1.5px dashed var(--line, #cbd5e1)", 
+                  <div
+                    style={{
+                      border: "1.5px dashed var(--line, #cbd5e1)",
                       borderRadius: "10px",
                       padding: "16px",
                       textAlign: "center",
@@ -1600,7 +1607,18 @@ export default function ProtocolsView({
                     }}
                     onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#10b981"; e.currentTarget.style.backgroundColor = "#f0fdf4"; }}
                     onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--line, #cbd5e1)"; e.currentTarget.style.backgroundColor = "#ffffff"; }}
-                    onClick={() => document.getElementById("audio-video-upload")?.click()}
+                    onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = "#10b981"; e.currentTarget.style.backgroundColor = "#f0fdf4"; }}
+                    onDragLeave={(e) => { e.currentTarget.style.borderColor = "var(--line, #cbd5e1)"; e.currentTarget.style.backgroundColor = "#ffffff"; }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.currentTarget.style.borderColor = "var(--line, #cbd5e1)";
+                      e.currentTarget.style.backgroundColor = "#ffffff";
+                      const dropped = e.dataTransfer.files?.[0];
+                      if (dropped) {
+                        handleFileSelect(dropped);
+                      }
+                    }}
+                    onClick={() => fileInputRef.current?.click()}
                   >
                     <div style={{ background: "#e6f4ea", borderRadius: "50%", width: "42px", height: "42px", display: "flex", alignItems: "center", justifyContent: "center" }}>
                       <Download size={20} style={{ color: "#10b981" }} />
@@ -1609,27 +1627,30 @@ export default function ProtocolsView({
                       {selectedFile ? selectedFile.name : <>Перетащите файл или <span style={{ color: "#10b981", textDecoration: "underline" }}>выберите</span></>}
                     </span>
                     <span style={{ fontSize: "11px", color: "var(--muted, #64748b)" }}>
-                      {selectedFile 
-                        ? `${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB · Заменить` 
+                      {selectedFile
+                        ? `${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB · Заменить`
                         : "MP4, MP3, WAV, M4A и др."
                       }
                     </span>
-                    
+
                     {selectedFile && mediaDuration && (
                       <span style={{ fontSize: "11.5px", color: "#137333", fontWeight: 600, background: "#e6f4ea", padding: "2px 8px", borderRadius: "4px" }}>
                         {`⏱️ ${Math.floor(mediaDuration / 60)} мин ${Math.round(mediaDuration % 60)} сек`}
                       </span>
                     )}
-                    
-                    <input 
-                      id="audio-video-upload" 
-                      type="file" 
-                      accept="audio/*,video/*" 
-                      style={{ display: "none" }} 
+
+                    <input
+                      id="audio-video-upload"
+                      ref={fileInputRef}
+                      type="file"
+                      accept="audio/*,video/*"
+                      style={{ display: "none" }}
                       onChange={(e) => {
                         if (e.target.files?.[0]) {
                           handleFileSelect(e.target.files[0]);
                         }
+                        // Reset value so picking the same file again re-fires onChange.
+                        e.target.value = "";
                       }}
                     />
                   </div>
